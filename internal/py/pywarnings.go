@@ -28,6 +28,9 @@ func warnExplicit(category, message, filename string, lineno int) {
 			text += "  " + line + "\n"
 		}
 	}
-	// warnings._showwarnmsg_impl ignores the OSError of a failed write.
-	_, _ = io.WriteString(interp.stderr, text)
+	// warnings._showwarnmsg_impl loses the warning when the write fails
+	// (`except OSError: pass`), which is what an error of the writer is.
+	if _, err := io.WriteString(interp.stderr, text); err != nil {
+		return
+	}
 }

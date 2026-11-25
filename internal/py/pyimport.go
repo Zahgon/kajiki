@@ -590,6 +590,9 @@ func importFromAttr(m Value, name string) (Value, error) {
 	if err != nil || v != nil {
 		return v, err
 	}
+	// import_from builds its ImportError whatever these lookups raise (it
+	// clears their errors), with the placeholders below for what they
+	// cannot give.
 	pkgName := "<unknown module name>"
 	if n, err := getattrOpt(m, "__name__"); err == nil && n != nil {
 		if s, ok := unsub(n).(strV); ok {
@@ -687,7 +690,7 @@ func importStar(m Value, f *frame) error {
 		for i, k := range keys {
 			s, ok := unsub(k).(strV)
 			if !ok {
-				return typeErr("Key in %s.__dict__ must be str, not %s", moduleName(m), typeName(k))
+				return starNameError(m, "Key", "__dict__", k)
 			}
 			if strings.HasPrefix(string(s), "_") {
 				continue
@@ -705,7 +708,7 @@ func importStar(m Value, f *frame) error {
 	for _, it := range items {
 		s, ok := unsub(it).(strV)
 		if !ok {
-			return typeErr("Item in %s.__all__ must be str, not %s", moduleName(m), typeName(it))
+			return starNameError(m, "Item", "__all__", it)
 		}
 		v, err := pyGetattr(m, string(s))
 		if err != nil {
@@ -718,13 +721,19 @@ func importStar(m Value, f *frame) error {
 	return nil
 }
 
-func moduleName(m Value) string {
-	if n, err := getattrOpt(m, "__name__"); err == nil && n != nil {
-		if s, ok := unsub(n).(strV); ok {
-			return string(s)
-		}
+// starNameError is the TypeError of import_all_from for a name in the
+// module's __dict__ (what is "Key", where "__dict__") or __all__ ("Item",
+// "__all__") that is not a str.
+func starNameError(m Value, what, where string, name Value) error {
+	modname, err := pyGetattr(m, "__name__")
+	if err != nil {
+		return err
 	}
-	return "?"
+	s, ok := unsub(modname).(strV)
+	if !ok {
+		return typeErr("module __name__ must be a string, not %s", typeName(modname))
+	}
+	return typeErr("%s in %s.%s must be str, not %s", what, string(s), where, typeName(name))
 }
 
 // builtinImport is __import__(name, globals=None, locals=None, fromlist=(),

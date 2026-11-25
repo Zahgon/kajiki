@@ -52,7 +52,7 @@ func newDecodeError(encoding string, object []byte, start, end int, reason strin
 func newEncodeError(encoding string, text []rune, start, end int, reason string) *codecError {
 	var msg string
 	if start < len(text) && end == start+1 {
-		ch := appendBackslashEscape(nil, text[start])
+		ch := pyuni.AppendEscape(nil, text[start])
 		msg = fmt.Sprintf("'%s' codec can't encode character '%s' in position %d: %s", encoding, ch, start, reason)
 	} else {
 		msg = fmt.Sprintf("'%s' codec can't encode characters in position %d-%d: %s", encoding, start, end-1, reason)
@@ -77,7 +77,7 @@ func decodeFailure(out *strings.Builder, errors, encoding string, object []byte,
 		out.WriteRune(0xFFFD)
 	case "backslashreplace":
 		for _, b := range object[start:end] {
-			out.Write(appendBackslashEscape(nil, rune(b)))
+			out.Write(pyuni.AppendEscape(nil, rune(b)))
 		}
 	case "surrogateescape":
 		// Each byte 0x80-0xff becomes the lone surrogate U+DC80-U+DCFF; an
@@ -160,7 +160,7 @@ func encodeReplacement(errors, encoding string, text []rune, start, end int, rea
 	case "backslashreplace":
 		var b []byte
 		for _, c := range text[start:end] {
-			b = appendBackslashEscape(b, c)
+			b = pyuni.AppendEscape(b, c)
 		}
 		sb.Write(b)
 	case "namereplace":
@@ -169,7 +169,7 @@ func encodeReplacement(errors, encoding string, text []rune, start, end int, rea
 			if name, ok := pyuni.Name(c); ok {
 				b = append(append(append(b, `\N{`...), name...), '}')
 			} else {
-				b = appendBackslashEscape(b, c)
+				b = pyuni.AppendEscape(b, c)
 			}
 		}
 		sb.Write(b)

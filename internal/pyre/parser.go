@@ -147,7 +147,7 @@ func (s *parseState) opengroup(name string, named bool) (int, string) {
 	}
 	if named {
 		if ogid, ok := s.groupdict[name]; ok {
-			return 0, fmt.Sprintf("redefinition of group name %s as group %d; was group %d", strRepr(name), gid, ogid)
+			return 0, fmt.Sprintf("redefinition of group name %s as group %d; was group %d", pyuni.ReprString(name), gid, ogid)
 		}
 		s.groupdict[name] = gid
 		s.groupOrder = append(s.groupOrder, GroupName{Name: name, Index: gid})
@@ -349,7 +349,7 @@ func (t *tokenizer) error(msg string, offset int) *Error {
 
 func (t *tokenizer) checkgroupname(name string, offset int) {
 	if !pyuni.IsIdentifier(name) {
-		panic(t.error("bad character in group name "+strRepr(name), runeLen(name)+offset))
+		panic(t.error("bad character in group name "+pyuni.ReprString(name), pyuni.Len(name)+offset))
 	}
 }
 
@@ -372,9 +372,21 @@ func runeAt(tok string, i int) string {
 	return ""
 }
 
-func parseHex(s string) int {
-	v, _ := strconv.ParseUint(s, 16, 64)
-	return int(v)
+// digitsValue is int(s, base) of an escape's digits, which the parser has
+// read as digits of that base and few enough not to overflow.
+func digitsValue(s string, base int) int {
+	v := 0
+	for _, c := range s {
+		d := int(c - '0')
+		switch {
+		case c >= 'a' && c <= 'f':
+			d = int(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			d = int(c-'A') + 10
+		}
+		v = v*base + d
+	}
+	return v
 }
 
 func lit(c int) *item { return &item{op: opLITERAL, arg: c} }
@@ -392,22 +404,22 @@ func classEscape(src *tokenizer, escape string) *item {
 	switch {
 	case c == "x":
 		escape += src.getwhile(2, hexDigits)
-		if runeLen(escape) != 4 {
-			panic(src.error("incomplete escape "+escape, runeLen(escape)))
+		if pyuni.Len(escape) != 4 {
+			panic(src.error("incomplete escape "+escape, pyuni.Len(escape)))
 		}
-		return lit(parseHex(escape[2:]))
+		return lit(digitsValue(escape[2:], 16))
 	case c == "u":
 		escape += src.getwhile(4, hexDigits)
-		if runeLen(escape) != 6 {
-			panic(src.error("incomplete escape "+escape, runeLen(escape)))
+		if pyuni.Len(escape) != 6 {
+			panic(src.error("incomplete escape "+escape, pyuni.Len(escape)))
 		}
-		return lit(parseHex(escape[2:]))
+		return lit(digitsValue(escape[2:], 16))
 	case c == "U":
 		escape += src.getwhile(8, hexDigits)
-		if runeLen(escape) != 10 {
-			panic(src.error("incomplete escape "+escape, runeLen(escape)))
+		if pyuni.Len(escape) != 10 {
+			panic(src.error("incomplete escape "+escape, pyuni.Len(escape)))
 		}
-		v := parseHex(escape[2:])
+		v := digitsValue(escape[2:], 16)
 		if v > 0x10ffff {
 			bad = true
 			break
@@ -417,21 +429,21 @@ func classEscape(src *tokenizer, escape string) *item {
 		return namedEscape(src)
 	case strings.Contains(octDigits, c) && c != "":
 		escape += src.getwhile(2, octDigits)
-		v, _ := strconv.ParseInt(escape[1:], 8, 64)
+		v := digitsValue(escape[1:], 8)
 		if v > 0o377 {
-			panic(src.error(fmt.Sprintf("octal escape value %s outside of range 0-0o377", escape), runeLen(escape)))
+			panic(src.error(fmt.Sprintf("octal escape value %s outside of range 0-0o377", escape), pyuni.Len(escape)))
 		}
-		return lit(int(v))
+		return lit(v)
 	case strings.Contains(digits, c) && c != "":
 		bad = true
 	}
-	if !bad && runeLen(escape) == 2 {
+	if !bad && pyuni.Len(escape) == 2 {
 		if strings.Contains(asciiLetters, c) {
-			panic(src.error("bad escape "+escape, runeLen(escape)))
+			panic(src.error("bad escape "+escape, pyuni.Len(escape)))
 		}
 		return lit(int(runeOf(c)))
 	}
-	panic(src.error("bad escape "+escape, runeLen(escape)))
+	panic(src.error("bad escape "+escape, pyuni.Len(escape)))
 }
 
 // namedEscape handles \N{name}: unicodedata.lookup of the name, which must be one code point.
@@ -443,7 +455,7 @@ func namedEscape(src *tokenizer) *item {
 	if r, ok := pyuni.Lookup(charname); ok {
 		return lit(int(r))
 	}
-	panic(src.error("undefined character name "+strRepr(charname), runeLen(charname)+len(`\N{}`)))
+	panic(src.error("undefined character name "+pyuni.ReprString(charname), pyuni.Len(charname)+len(`\N{}`)))
 }
 
 // parseEscape handles an escape outside a character set.
@@ -459,22 +471,22 @@ func parseEscape(src *tokenizer, escape string, state *parseState) *item {
 	switch {
 	case c == "x":
 		escape += src.getwhile(2, hexDigits)
-		if runeLen(escape) != 4 {
-			panic(src.error("incomplete escape "+escape, runeLen(escape)))
+		if pyuni.Len(escape) != 4 {
+			panic(src.error("incomplete escape "+escape, pyuni.Len(escape)))
 		}
-		return lit(parseHex(escape[2:]))
+		return lit(digitsValue(escape[2:], 16))
 	case c == "u":
 		escape += src.getwhile(4, hexDigits)
-		if runeLen(escape) != 6 {
-			panic(src.error("incomplete escape "+escape, runeLen(escape)))
+		if pyuni.Len(escape) != 6 {
+			panic(src.error("incomplete escape "+escape, pyuni.Len(escape)))
 		}
-		return lit(parseHex(escape[2:]))
+		return lit(digitsValue(escape[2:], 16))
 	case c == "U":
 		escape += src.getwhile(8, hexDigits)
-		if runeLen(escape) != 10 {
-			panic(src.error("incomplete escape "+escape, runeLen(escape)))
+		if pyuni.Len(escape) != 10 {
+			panic(src.error("incomplete escape "+escape, pyuni.Len(escape)))
 		}
-		v := parseHex(escape[2:])
+		v := digitsValue(escape[2:], 16)
 		if v > 0x10ffff {
 			bad = true
 			break
@@ -484,38 +496,38 @@ func parseEscape(src *tokenizer, escape string, state *parseState) *item {
 		return namedEscape(src)
 	case c == "0":
 		escape += src.getwhile(2, octDigits)
-		v, _ := strconv.ParseInt(escape[1:], 8, 64)
-		return lit(int(v))
+		v := digitsValue(escape[1:], 8)
+		return lit(v)
 	case c != "" && strings.Contains(digits, c):
 		if isOneOf(src.next, digits) {
 			escape += src.get()
 			if strings.Contains(octDigits, runeAt(escape, 1)) && strings.Contains(octDigits, runeAt(escape, 2)) &&
 				isOneOf(src.next, octDigits) {
 				escape += src.get()
-				v, _ := strconv.ParseInt(escape[1:], 8, 64)
+				v := digitsValue(escape[1:], 8)
 				if v > 0o377 {
-					panic(src.error(fmt.Sprintf("octal escape value %s outside of range 0-0o377", escape), runeLen(escape)))
+					panic(src.error(fmt.Sprintf("octal escape value %s outside of range 0-0o377", escape), pyuni.Len(escape)))
 				}
-				return lit(int(v))
+				return lit(v)
 			}
 		}
-		group, _ := strconv.Atoi(escape[1:])
+		group := digitsValue(escape[1:], 10)
 		if group < state.groups() {
 			if !state.checkgroup(group) {
-				panic(src.error("cannot refer to an open group", runeLen(escape)))
+				panic(src.error("cannot refer to an open group", pyuni.Len(escape)))
 			}
 			state.checklookbehindgroup(group, src)
 			return &item{op: opGROUPREF, arg: group}
 		}
-		panic(src.error(fmt.Sprintf("invalid group reference %d", group), runeLen(escape)-1))
+		panic(src.error(fmt.Sprintf("invalid group reference %d", group), pyuni.Len(escape)-1))
 	}
-	if !bad && runeLen(escape) == 2 {
+	if !bad && pyuni.Len(escape) == 2 {
 		if strings.Contains(asciiLetters, c) {
-			panic(src.error("bad escape "+escape, runeLen(escape)))
+			panic(src.error("bad escape "+escape, pyuni.Len(escape)))
 		}
 		return lit(int(runeOf(c)))
 	}
-	panic(src.error("bad escape "+escape, runeLen(escape)))
+	panic(src.error("bad escape "+escape, pyuni.Len(escape)))
 }
 
 // parseSub parses an alternation a|b|c.
@@ -677,10 +689,10 @@ func parseSet(src *tokenizer) *item {
 			}
 			msg := fmt.Sprintf("bad character range %s-%s", this, that)
 			if code1.op != opLITERAL || code2.op != opLITERAL {
-				panic(src.error(msg, runeLen(this)+1+runeLen(that)))
+				panic(src.error(msg, pyuni.Len(this)+1+pyuni.Len(that)))
 			}
 			if code2.arg < code1.arg {
-				panic(src.error(msg, runeLen(this)+1+runeLen(that)))
+				panic(src.error(msg, pyuni.Len(this)+1+pyuni.Len(that)))
 			}
 			set = append(set, &item{op: opRANGE, lo: code1.arg, hi: code2.arg})
 		} else {
@@ -752,11 +764,11 @@ func parseRepeat(src *tokenizer, sub *subPattern, this string) bool {
 		body = &subPattern{state: sub.state, data: []*item{sub.data[len(sub.data)-1]}}
 	}
 	if body == nil || body.data[0].op == opAT {
-		panic(src.error("nothing to repeat", src.tell()-here+runeLen(this)))
+		panic(src.error("nothing to repeat", src.tell()-here+pyuni.Len(this)))
 	}
 	switch body.data[0].op {
 	case opMIN_REPEAT, opMAX_REPEAT, opPOSSESSIVE_REPEAT:
-		panic(src.error("multiple repeat", src.tell()-here+runeLen(this)))
+		panic(src.error("multiple repeat", src.tell()-here+pyuni.Len(this)))
 	case opSUBPATTERN:
 		g := body.data[0]
 		if g.group == 0 && g.addFlags == 0 && g.delFlags == 0 {
@@ -805,10 +817,10 @@ func parseGroup(src *tokenizer, state *parseState, sub *subPattern, verbose bool
 				src.checkgroupname(name, 1)
 				gid, ok := state.groupdict[name]
 				if !ok {
-					panic(src.error("unknown group name "+strRepr(name), runeLen(name)+1))
+					panic(src.error("unknown group name "+pyuni.ReprString(name), pyuni.Len(name)+1))
 				}
 				if !state.checkgroup(gid) {
-					panic(src.error("cannot refer to an open group", runeLen(name)+1))
+					panic(src.error("cannot refer to an open group", pyuni.Len(name)+1))
 				}
 				state.checklookbehindgroup(gid, src)
 				return &item{op: opGROUPREF, arg: gid}
@@ -817,7 +829,7 @@ func parseGroup(src *tokenizer, state *parseState, sub *subPattern, verbose bool
 				if char == "" {
 					panic(src.error("unexpected end of pattern", 0))
 				}
-				panic(src.error("unknown extension ?P"+char, runeLen(char)+2))
+				panic(src.error("unknown extension ?P"+char, pyuni.Len(char)+2))
 			}
 		case char == ":":
 			capture = false
@@ -840,7 +852,7 @@ func parseGroup(src *tokenizer, state *parseState, sub *subPattern, verbose bool
 					panic(src.error("unexpected end of pattern", 0))
 				}
 				if char != "=" && char != "!" {
-					panic(src.error("unknown extension ?<"+char, runeLen(char)+2))
+					panic(src.error("unknown extension ?<"+char, pyuni.Len(char)+2))
 				}
 				dir = -1
 				lookbehindgroups = state.lookbehindgroups
@@ -866,20 +878,20 @@ func parseGroup(src *tokenizer, state *parseState, sub *subPattern, verbose bool
 				src.checkgroupname(condname, 1)
 				g, ok := state.groupdict[condname]
 				if !ok {
-					panic(src.error("unknown group name "+strRepr(condname), runeLen(condname)+1))
+					panic(src.error("unknown group name "+pyuni.ReprString(condname), pyuni.Len(condname)+1))
 				}
 				condgroup = g
 			} else {
 				v, err := strconv.ParseUint(condname, 10, 64)
 				switch {
 				case err == nil && v == 0:
-					panic(src.error("bad group number", runeLen(condname)+1))
+					panic(src.error("bad group number", pyuni.Len(condname)+1))
 				case err != nil || v >= maxGroups:
-					panic(src.error("invalid group reference "+strings.TrimLeft(condname, "0"), runeLen(condname)+1))
+					panic(src.error("invalid group reference "+strings.TrimLeft(condname, "0"), pyuni.Len(condname)+1))
 				}
 				condgroup = int(v)
 				if _, ok := state.grouprefpos[condgroup]; !ok {
-					state.grouprefpos[condgroup] = src.tell() - runeLen(condname) - 1
+					state.grouprefpos[condgroup] = src.tell() - pyuni.Len(condname) - 1
 					state.grouprefOrder = append(state.grouprefOrder, condgroup)
 				}
 			}
@@ -911,14 +923,14 @@ func parseGroup(src *tokenizer, state *parseState, sub *subPattern, verbose bool
 			addFlags, delFlags = add, del
 			capture = false
 		default:
-			panic(src.error("unknown extension ?"+char, runeLen(char)+1))
+			panic(src.error("unknown extension ?"+char, pyuni.Len(char)+1))
 		}
 	}
 	group := 0
 	if capture {
 		gid, msg := state.opengroup(name, named)
 		if msg != "" {
-			panic(src.error(msg, runeLen(name)+1))
+			panic(src.error(msg, pyuni.Len(name)+1))
 		}
 		group = gid
 	}
@@ -949,7 +961,7 @@ func isASCIIDecimal(s string) bool {
 }
 
 func isFlagLetter(s string) bool {
-	if runeLen(s) != 1 {
+	if pyuni.Len(s) != 1 {
 		return false
 	}
 	_, ok := flagLetters[runeOf(s)]
@@ -957,7 +969,7 @@ func isFlagLetter(s string) bool {
 }
 
 func isAlphaTok(s string) bool {
-	return runeLen(s) == 1 && pyuni.IsAlpha(runeOf(s))
+	return pyuni.Len(s) == 1 && pyuni.IsAlpha(runeOf(s))
 }
 
 // parseFlags parses inline flags after "(?". global is true for "(?flags)".
@@ -984,7 +996,7 @@ func parseFlags(src *tokenizer, state *parseState, char string) (add, del int, g
 				if isAlphaTok(char) {
 					msg = "unknown flag"
 				}
-				panic(src.error(msg, runeLen(char)))
+				panic(src.error(msg, pyuni.Len(char)))
 			}
 		}
 	}
@@ -1005,7 +1017,7 @@ func parseFlags(src *tokenizer, state *parseState, char string) (add, del int, g
 			if isAlphaTok(char) {
 				msg = "unknown flag"
 			}
-			panic(src.error(msg, runeLen(char)))
+			panic(src.error(msg, pyuni.Len(char)))
 		}
 		for {
 			flag := flagLetters[runeOf(char)]
@@ -1025,7 +1037,7 @@ func parseFlags(src *tokenizer, state *parseState, char string) (add, del int, g
 				if isAlphaTok(char) {
 					msg = "unknown flag"
 				}
-				panic(src.error(msg, runeLen(char)))
+				panic(src.error(msg, pyuni.Len(char)))
 			}
 		}
 	}

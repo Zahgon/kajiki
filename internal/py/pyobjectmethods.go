@@ -161,10 +161,17 @@ func makeObjectMethod(name string) (Value, bool) {
 			if err := posOnly(name, 0, 0, args, kw); err != nil {
 				return nil, err
 			}
+			// The basic size of the type: the object header and a pointer
+			// for each __slots__ entry of the class and its bases (the
+			// __dict__ and __weakref__ pointers go before the header).
 			size := 16
 			if k := userClassOf(self); k != nil {
-				if slots, err := classSlots(k.dict, k.bases); err == nil {
-					size += 8 * len(slots)
+				for _, c := range k.mroList() {
+					for _, s := range c.slots {
+						if s != "__dict__" && s != "__weakref__" {
+							size += 8
+						}
+					}
 				}
 			}
 			return mkInt(int64(size)), nil
@@ -220,7 +227,20 @@ func copyregReconstructor() Value {
 		if err != nil {
 			return nil, err
 		}
-		if init, err := GetAttr(args[1], "__init__"); err == nil && !Is(init, objectClass) {
+		// if base.__init__ != object.__init__: base.__init__(obj, state)
+		init, err := GetAttr(args[1], "__init__")
+		if err != nil {
+			return nil, err
+		}
+		objectInit, err := GetAttr(objectClass, "__init__")
+		if err != nil {
+			return nil, err
+		}
+		differ, err := Compare("!=", init, objectInit)
+		if err != nil {
+			return nil, err
+		}
+		if differ {
 			if _, err := Call(init, []Value{obj, args[2]}, nil); err != nil {
 				return nil, err
 			}

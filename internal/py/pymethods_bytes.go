@@ -14,11 +14,9 @@ import (
 // asciiSpace is the whitespace of bytes methods.
 const asciiSpace = " \t\n\r\x0b\x0c"
 
-func isASCIISpace(c byte) bool  { return strings.IndexByte(asciiSpace, c) >= 0 }
-func isASCIILower(c byte) bool  { return c >= 'a' && c <= 'z' }
-func isASCIIUpper(c byte) bool  { return c >= 'A' && c <= 'Z' }
-func isASCIIDigitB(c byte) bool { return c >= '0' && c <= '9' }
-func isASCIIAlphaB(c byte) bool { return isASCIILower(c) || isASCIIUpper(c) }
+func isASCIISpace(c byte) bool { return strings.IndexByte(asciiSpace, c) >= 0 }
+func isASCIILower(c byte) bool { return c >= 'a' && c <= 'z' }
+func isASCIIUpper(c byte) bool { return c >= 'A' && c <= 'Z' }
 func asciiToUpper(c byte) byte {
 	if isASCIILower(c) {
 		return c - 32
@@ -144,13 +142,15 @@ func bytesMethod(obj Value, name string) (Value, bool) {
 	case "title":
 		return mapBytes(bytesTitle)
 	case "isalpha":
-		return pred(func(s string) bool { return s != "" && allBytes(s, isASCIIAlphaB) })
+		return pred(func(s string) bool {
+			return s != "" && allBytes(s, func(c byte) bool { return isASCIILetter(rune(c)) })
+		})
 	case "isalnum":
 		return pred(func(s string) bool {
-			return s != "" && allBytes(s, func(c byte) bool { return isASCIIAlphaB(c) || isASCIIDigitB(c) })
+			return s != "" && allBytes(s, func(c byte) bool { return isASCIIAlnum(rune(c)) })
 		})
 	case "isdigit":
-		return pred(func(s string) bool { return s != "" && allBytes(s, isASCIIDigitB) })
+		return pred(func(s string) bool { return s != "" && allBytes(s, func(c byte) bool { return isASCIIDigit(rune(c)) }) })
 	case "isspace":
 		return pred(func(s string) bool { return s != "" && allBytes(s, isASCIISpace) })
 	case "isascii":
@@ -982,6 +982,3 @@ func bytearrayMethod(ba *bytearrayV, name string) (Value, bool) {
 	}
 	return nil, false
 }
-
-// decodeLatin1 reads bytes as the code points 0-255.
-func decodeLatin1(b string) string { return latin1Decode([]byte(b)) }

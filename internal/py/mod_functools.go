@@ -146,7 +146,11 @@ func partialMethods() *methods {
 		st := &partialState{fn: f, args: append([]Value(nil), args[2:]...)}
 		if inner, ok := Native(f).(*partialState); ok && Is(TypeOf(f), cls) {
 			if d := InstanceDict(f); d != nil {
-				if n, err := Len(d); err == nil && n == 0 {
+				n, err := Len(d)
+				if err != nil {
+					return nil, err
+				}
+				if n == 0 {
 					st.fn = inner.fn
 					st.args = append(append([]Value(nil), inner.args...), st.args...)
 					st.keywords = mergeKeywords(inner.keywords, nil)
@@ -198,20 +202,20 @@ func partialMethods() *methods {
 			return nil, err
 		}
 		parts := []string{}
-		r, err := repr(st.fn)
+		r, err := Repr(st.fn)
 		if err != nil {
 			return nil, err
 		}
 		parts = append(parts, r)
 		for _, a := range st.args {
-			s, err := repr(a)
+			s, err := Repr(a)
 			if err != nil {
 				return nil, err
 			}
 			parts = append(parts, s)
 		}
 		for _, k := range st.keywords {
-			s, err := repr(k.Value)
+			s, err := Repr(k.Value)
 			if err != nil {
 				return nil, err
 			}
@@ -225,8 +229,14 @@ func partialMethods() *methods {
 		if err != nil {
 			return nil, err
 		}
-		q, _ := AsString(qual)
-		m, _ := AsString(mod)
+		q, err := Str(qual)
+		if err != nil {
+			return nil, err
+		}
+		m, err := Str(mod)
+		if err != nil {
+			return nil, err
+		}
 		return String(m + "." + q + "(" + strings.Join(parts, ", ") + ")"), nil
 	})
 	return ms
@@ -258,16 +268,19 @@ func updateWrapper(args []Value, kwargs []Keyword) (Value, error) {
 		return nil, err
 	}
 	wrapper, wrapped := buf[0], buf[1]
-	assigned, err := listOf(orDefault(buf[2], strTuple(wrapperAssignments)))
+	assigned, err := ToList(orDefault(buf[2], strTuple(wrapperAssignments)))
 	if err != nil {
 		return nil, err
 	}
-	updated, err := listOf(orDefault(buf[3], strTuple(wrapperUpdates)))
+	updated, err := ToList(orDefault(buf[3], strTuple(wrapperUpdates)))
 	if err != nil {
 		return nil, err
 	}
 	for _, a := range assigned {
-		name, _ := AsString(a)
+		name, err := attrName(a)
+		if err != nil {
+			return nil, err
+		}
 		v, err := GetAttr(wrapped, name)
 		if err != nil {
 			if ErrorIs(err, "AttributeError") {
@@ -280,7 +293,10 @@ func updateWrapper(args []Value, kwargs []Keyword) (Value, error) {
 		}
 	}
 	for _, u := range updated {
-		name, _ := AsString(u)
+		name, err := attrName(u)
+		if err != nil {
+			return nil, err
+		}
 		dst, err := GetAttr(wrapper, name)
 		if err != nil {
 			return nil, err
@@ -322,7 +338,7 @@ func lruCache(wrapperCls, updateWrapperFn Value, args []Value, kwargs []Keyword)
 	}
 	typed := false
 	if buf[1] != nil {
-		if typed, err = truth(buf[1]); err != nil {
+		if typed, err = Truth(buf[1]); err != nil {
 			return nil, err
 		}
 	}
@@ -439,7 +455,11 @@ func lruWrapperMethods(cacheInfo Value) *methods {
 			if in, err := Contains(st.cache, key); err != nil || in {
 				return result, err
 			}
-			if n, _ := Len(st.cache); n >= st.maxsize {
+			n, err := Len(st.cache)
+			if err != nil {
+				return nil, err
+			}
+			if n >= st.maxsize {
 				keys, _, _ := DictItems(st.cache)
 				if err := DelItem(st.cache, keys[0]); err != nil {
 					return nil, err
@@ -522,30 +542,21 @@ var orderingRules = map[string][]derived{
 	"__ge__": {{"__le__", "_le_from_ge", true, "or=="}, {"__gt__", "_gt_from_ge", false, "and!="}, {"__lt__", "_lt_from_ge", true, ""}},
 }
 
-// definesOwn reports whether cls or one of its bases other than object
-// defines the special method name.
-func definesOwn(cls Value, name string) bool {
-	mro, err := GetAttr(cls, "__mro__")
+// definesOwn is `getattr(cls, name, None) is not getattr(object, name,
+// None)`: whether cls has its own special method name rather than object's.
+func definesOwn(cls Value, name string) (bool, error) {
+	mine, err := getattrOpt(cls, name)
 	if err != nil {
-		return false
+		return false, err
 	}
-	items, _ := SeqItems(mro)
-	for _, k := range items {
-		if Is(k, Builtin("object")) {
-			continue
-		}
-		d, err := GetAttr(k, "__dict__")
-		if err != nil {
-			if has, herr := HasAttr(k, name); herr == nil && has {
-				return true
-			}
-			continue
-		}
-		if in, err := Contains(d, String(name)); err == nil && in {
-			return true
-		}
+	objects, err := getattrOpt(objectClass, name)
+	if err != nil {
+		return false, err
 	}
-	return false
+	if mine == nil || objects == nil {
+		return mine != objects, nil
+	}
+	return !sameObject(mine, objects), nil
 }
 
 // totalOrdering is functools.total_ordering(cls).
@@ -557,7 +568,11 @@ func totalOrdering(args []Value, kwargs []Keyword) (Value, error) {
 	roots := map[string]bool{}
 	root := ""
 	for _, op := range orderingRoots {
-		if definesOwn(cls, op) {
+		own, err := definesOwn(cls, op)
+		if err != nil {
+			return nil, err
+		}
+		if own {
 			roots[op] = true
 			if op > root {
 				root = op
@@ -585,7 +600,7 @@ func totalOrdering(args []Value, kwargs []Keyword) (Value, error) {
 			if err != nil || IsNotImplemented(r) {
 				return r, err
 			}
-			t, err := truth(r)
+			t, err := Truth(r)
 			if err != nil {
 				return nil, err
 			}
@@ -683,7 +698,7 @@ func cachedPropertyMethods() *methods {
 		}
 		doc, err := GetAttr(args[1], "__doc__")
 		if err != nil {
-			doc = None()
+			return nil, err
 		}
 		return nil, SetAttr(args[0], "__doc__", doc)
 	})
@@ -699,8 +714,15 @@ func cachedPropertyMethods() *methods {
 			if err != nil {
 				return nil, err
 			}
-			return nil, raise("TypeError", "Cannot assign the same cached_property to two different names (%s and %s).",
-				mustRepr(cur), mustRepr(args[2]))
+			a, err := Repr(cur)
+			if err != nil {
+				return nil, err
+			}
+			b, err := Repr(args[2])
+			if err != nil {
+				return nil, err
+			}
+			return nil, raise("TypeError", "Cannot assign the same cached_property to two different names (%s and %s).", a, b)
 		}
 		return nil, nil
 	})
@@ -717,14 +739,28 @@ func cachedPropertyMethods() *methods {
 		if IsNone(name) {
 			return nil, raise("TypeError", "Cannot use cached_property instance without calling __set_name__ on it.")
 		}
-		d := InstanceDict(inst)
-		if d == nil {
-			n, _ := AsString(name)
-			return nil, raise("TypeError", "No '__dict__' attribute on %s instance to cache %s property.",
-				mustRepr(String(TypeName(inst))), mustRepr(String(n)))
+		// cache = instance.__dict__, a TypeError (from None) for an
+		// instance without one.
+		cache, err := getattrOpt(inst, "__dict__")
+		if err != nil {
+			return nil, err
 		}
-		if v, err := GetItem(d, name); err == nil {
-			return v, nil
+		if cache == nil {
+			n, err := Repr(name)
+			if err != nil {
+				return nil, err
+			}
+			return nil, raise("TypeError", "No '__dict__' attribute on %s instance to cache %s property.",
+				strRepr(TypeName(inst)), n)
+		}
+		// cache.get(self.attrname, _NOT_FOUND): only a missing key falls
+		// through to computing the value.
+		cached, err := GetItem(cache, name)
+		if err == nil {
+			return cached, nil
+		}
+		if !ErrorIs(err, "KeyError") {
+			return nil, err
 		}
 		f, err := GetAttr(self, "func")
 		if err != nil {
@@ -734,18 +770,20 @@ func cachedPropertyMethods() *methods {
 		if err != nil {
 			return nil, err
 		}
-		return v, SetItem(d, name, v)
+		if err := SetItem(cache, name, v); err != nil {
+			if !ErrorIs(err, "TypeError") {
+				return nil, err
+			}
+			n, rerr := Repr(name)
+			if rerr != nil {
+				return nil, rerr
+			}
+			return nil, raise("TypeError", "The '__dict__' attribute on %s instance does not support item assignment for caching %s property.",
+				strRepr(TypeName(inst)), n)
+		}
+		return v, nil
 	})
 	return ms
-}
-
-// mustRepr is repr(v) for values whose repr cannot fail (strs).
-func mustRepr(v Value) string {
-	s, err := repr(v)
-	if err != nil {
-		return "?"
-	}
-	return s
 }
 
 // singledispatch is functools.singledispatch(func): a function dispatching
@@ -756,10 +794,16 @@ func singledispatch(updateWrapperFn, f Value) (Value, error) {
 	if err := SetItem(registry, Builtin("object"), f); err != nil {
 		return nil, err
 	}
+	// funcname = getattr(func, '__name__', 'singledispatch function'),
+	// shown with str() in the error for a call without arguments.
 	funcname := "singledispatch function"
-	if n, err := GetAttr(f, "__name__"); err == nil {
-		if s, ok := AsString(n); ok {
-			funcname = s
+	n, err := getattrOpt(f, "__name__")
+	if err != nil {
+		return nil, err
+	}
+	if n != nil {
+		if funcname, err = Str(n); err != nil {
+			return nil, err
 		}
 	}
 	dispatch := BuiltinFunc("dispatch", func(args []Value, kwargs []Keyword) (Value, error) {
@@ -770,10 +814,17 @@ func singledispatch(updateWrapperFn, f Value) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		classes, _ := SeqItems(mro)
+		classes, err := ToList(mro)
+		if err != nil {
+			return nil, err
+		}
 		for _, c := range classes {
-			if impl, err := GetItem(registry, c); err == nil {
-				return impl, nil
+			in, err := Contains(registry, c)
+			if err != nil {
+				return nil, err
+			}
+			if in {
+				return GetItem(registry, c)
 			}
 		}
 		return f, nil
@@ -796,14 +847,32 @@ func singledispatch(updateWrapperFn, f Value) (Value, error) {
 			return args[1], SetItem(registry, cls, args[1])
 		}
 		impl := cls
-		ann, err := GetAttr(impl, "__annotations__")
-		keys, vals, ok := DictItems(ann)
-		if err != nil || !ok || len(keys) == 0 {
-			r := mustRepr(impl)
+		// ann = getattr(cls, '__annotations__', {})
+		ann, err := getattrOpt(impl, "__annotations__")
+		if err != nil {
+			return nil, err
+		}
+		var keys, vals []Value
+		if ann != nil {
+			keys, vals, _ = DictItems(ann)
+		}
+		if len(keys) == 0 {
+			r, err := Repr(impl)
+			if err != nil {
+				return nil, err
+			}
 			return nil, raise("TypeError", "Invalid first argument to `register()`: %s. Use either `@register(some_class)` or plain `@register` on an annotated function.", r)
 		}
 		if !isClass(vals[0]) {
-			return nil, raise("TypeError", "Invalid annotation for %s. %s is not a class.", mustRepr(keys[0]), mustRepr(vals[0]))
+			k, err := Repr(keys[0])
+			if err != nil {
+				return nil, err
+			}
+			v, err := Repr(vals[0])
+			if err != nil {
+				return nil, err
+			}
+			return nil, raise("TypeError", "Invalid annotation for %s. %s is not a class.", k, v)
 		}
 		return impl, SetItem(registry, vals[0], impl)
 	})

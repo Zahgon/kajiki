@@ -201,9 +201,10 @@ func newExc(class string, args []Value) *excV {
 
 // excStr is the Message of an exception built from args: the str() of the
 // args. Building an exception does not call str() in Python, so a str() that
-// raises is not an error here; the Message is then the text CPython shows for
-// such an exception, and excText raises the error when Python code asks for
-// str().
+// raises is not an error here; the Message is then the text CPython's
+// traceback display shows for such an exception (PyErr_Display's
+// "<exception str() failed>"), and excText raises the error when Python
+// code asks for str().
 func excStr(class string, args []Value) string {
 	s, err := excArgsStr(class, args)
 	if err != nil {

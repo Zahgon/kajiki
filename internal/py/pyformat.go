@@ -9,6 +9,7 @@
 package py
 
 import (
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 	"math"
 	"math/big"
 	"strconv"
@@ -61,11 +62,11 @@ func percentFormat(format string, args Value) (string, error) {
 
 // percentFormatBytes is `format % args` for bytes (_PyBytes_FormatEx).
 func percentFormatBytes(format string, args Value) (string, error) {
-	out, err := (&pctFormatter{f: strRunes(decodeLatin1(format)), bytesMode: true}).run(args)
+	out, err := (&pctFormatter{f: strRunes(latin1Decode([]byte(format))), bytesMode: true}).run(args)
 	if err != nil {
 		return "", err
 	}
-	return unlatin1(out), nil
+	return string(latin1Encode(out)), nil
 }
 
 // kind names what is formatted, for the error messages.
@@ -104,15 +105,6 @@ func (c *pctFormatter) run(args Value) (string, error) {
 		return "", typeErr("not all arguments converted during %s formatting", c.kind())
 	}
 	return c.out.String(), nil
-}
-
-// unlatin1 is the inverse of decodeLatin1: code points 0-255 as bytes.
-func unlatin1(s string) string {
-	out := make([]byte, 0, len(s))
-	for _, r := range s {
-		out = append(out, byte(r))
-	}
-	return string(out)
 }
 
 // next reads the next format character into c.ch, or records the end.
@@ -208,7 +200,7 @@ func (c *pctFormatter) parse(a *pctArg) error {
 		}
 		var key Value = strV(runesStr(c.f[start : c.pos-1]))
 		if c.bytesMode {
-			key = bytesV(unlatin1(runesStr(c.f[start : c.pos-1])))
+			key = bytesV(latin1Encode(runesStr(c.f[start : c.pos-1])))
 		}
 		v, err := fmtMappingItem(c.dict, key)
 		if err != nil {
@@ -405,7 +397,7 @@ func pctLong(v Value, a *pctArg) (string, error) {
 // result is the bytes as code points 0-255.
 func bytesFormatObj(v Value) (string, error) {
 	if b, ok := bytesOf(unsub(v)); ok {
-		return decodeLatin1(b), nil
+		return latin1Decode([]byte(b)), nil
 	}
 	if r, ok, err := callSpecial(v, "__bytes__"); ok {
 		if err != nil {
@@ -415,7 +407,7 @@ func bytesFormatObj(v Value) (string, error) {
 		if !isBytes {
 			return "", typeErr("__bytes__ returned non-bytes (type %s)", typeName(r))
 		}
-		return decodeLatin1(string(b)), nil
+		return latin1Decode([]byte(string(b))), nil
 	}
 	return "", typeErr("%%b requires a bytes-like object, or an object that implements __bytes__, not '%s'", typeName(v))
 }
@@ -424,13 +416,13 @@ func bytesFormatObj(v Value) (string, error) {
 // (byte_converter): an int in range(256) or a bytes object of length 1.
 func bytesFormatChar(v Value) (string, error) {
 	if b, ok := bytesOf(unsub(v)); ok && len(b) == 1 {
-		return decodeLatin1(b), nil
+		return latin1Decode([]byte(b)), nil
 	}
 	if i, ok := asInt(v); ok {
 		if !i.IsInt64() || i.Int64() < 0 || i.Int64() > 255 {
 			return "", newPyErr("OverflowError", "%c arg not in range(256)")
 		}
-		return decodeLatin1(string([]byte{byte(i.Int64())})), nil
+		return latin1Decode([]byte{byte(i.Int64())}), nil
 	}
 	return "", typeErr("%%c requires an integer in range(256) or a single byte")
 }
@@ -622,7 +614,7 @@ func fmtASCIIEscape(s string) string {
 		if r < 0x80 {
 			b = append(b, byte(r))
 		} else {
-			b = appendBackslashEscape(b, r)
+			b = pyuni.AppendEscape(b, r)
 		}
 	}
 	return string(b)

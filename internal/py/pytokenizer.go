@@ -174,6 +174,8 @@ func fileLine(filename string, lineno int) (string, bool) {
 	if filename == "" || strings.HasPrefix(filename, "<") || lineno < 1 {
 		return "", false
 	}
+	// linecache.updatecache gives no lines for a file it cannot read
+	// (`except OSError: return []`), which is what a read error is.
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return "", false
@@ -385,10 +387,6 @@ func isPotentialIdentifierChar(c int) bool {
 	return isPotentialIdentifierStart(c) || c >= '0' && c <= '9'
 }
 
-func isDigit(c int) bool { return c >= '0' && c <= '9' }
-
-func isXDigit(c int) bool { return isDigit(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' }
-
 // lookahead reports whether the next characters are word followed by a
 // character that cannot continue a name, reading nothing.
 func (t *tokenizer) lookahead(word string) bool {
@@ -487,14 +485,14 @@ func isIdentContinue(r rune) bool { return pyuni.IsIdentifierContinue(r) }
 func (t *tokenizer) decimalTail() int {
 	for {
 		c := t.nextc()
-		for isDigit(c) {
+		for isASCIIDigit(rune(c)) {
 			c = t.nextc()
 		}
 		if c != '_' {
 			return c
 		}
 		c = t.nextc()
-		if !isDigit(c) {
+		if !isASCIIDigit(rune(c)) {
 			t.backup(c)
 			t.syntaxError("invalid decimal literal")
 			return 0
@@ -760,7 +758,7 @@ again:
 	// A period, or a number starting with one.
 	if c == '.' {
 		c = t.nextc()
-		if isDigit(c) {
+		if isASCIIDigit(rune(c)) {
 			return t.numberToken(tok, t.decimalRest(c, true))
 		} else if c == '.' {
 			c = t.nextc()
@@ -775,7 +773,7 @@ again:
 		return t.makeToken(tok, tDOT, t.start, t.cur)
 	}
 
-	if isDigit(c) {
+	if isASCIIDigit(rune(c)) {
 		return t.numberToken(tok, t.number(c))
 	}
 
@@ -920,11 +918,11 @@ func (t *tokenizer) number(c int) int {
 			if c == '_' {
 				c = t.nextc()
 			}
-			if !isXDigit(c) {
+			if !isHexDigit(rune(c)) {
 				t.backup(c)
 				return t.syntaxError("invalid hexadecimal literal")
 			}
-			for c = t.nextc(); isXDigit(c); c = t.nextc() {
+			for c = t.nextc(); isHexDigit(rune(c)); c = t.nextc() {
 			}
 			if c != '_' {
 				break
@@ -944,7 +942,7 @@ func (t *tokenizer) number(c int) int {
 				c = t.nextc()
 			}
 			if !isBaseDigit(c) {
-				if isDigit(c) {
+				if isASCIIDigit(rune(c)) {
 					return t.syntaxError("invalid digit '%c' in %s literal", c, kind)
 				}
 				t.backup(c)
@@ -956,7 +954,7 @@ func (t *tokenizer) number(c int) int {
 				break
 			}
 		}
-		if isDigit(c) {
+		if isASCIIDigit(rune(c)) {
 			return t.syntaxError("invalid digit '%c' in %s literal", c, kind)
 		}
 		if !t.verifyEndOfNumber(c, kind) {
@@ -968,7 +966,7 @@ func (t *tokenizer) number(c int) int {
 		for {
 			if c == '_' {
 				c = t.nextc()
-				if !isDigit(c) {
+				if !isASCIIDigit(rune(c)) {
 					t.backup(c)
 					return t.syntaxError("invalid decimal literal")
 				}
@@ -979,7 +977,7 @@ func (t *tokenizer) number(c int) int {
 			c = t.nextc()
 		}
 		zerosEnd := t.cur
-		if isDigit(c) {
+		if isASCIIDigit(rune(c)) {
 			nonzero = true
 			if c = t.decimalTail(); c == 0 {
 				return tERRORTOKEN
@@ -1006,7 +1004,7 @@ func (t *tokenizer) number(c int) int {
 // decimalRest reads the rest of a decimal literal from c: its fraction
 // (when afterDot, c follows the '.'), exponent and imaginary suffix.
 func (t *tokenizer) decimalRest(c int, afterDot bool) int {
-	if afterDot && isDigit(c) {
+	if afterDot && isASCIIDigit(rune(c)) {
 		if c = t.decimalTail(); c == 0 {
 			return tERRORTOKEN
 		}
@@ -1016,11 +1014,11 @@ func (t *tokenizer) decimalRest(c int, afterDot bool) int {
 		c = t.nextc()
 		if c == '+' || c == '-' {
 			c = t.nextc()
-			if !isDigit(c) {
+			if !isASCIIDigit(rune(c)) {
 				t.backup(c)
 				return t.syntaxError("invalid decimal literal")
 			}
-		} else if !isDigit(c) {
+		} else if !isASCIIDigit(rune(c)) {
 			t.backup(c)
 			if !t.verifyEndOfNumber(e, "decimal") {
 				return tERRORTOKEN

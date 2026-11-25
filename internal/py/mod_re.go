@@ -49,9 +49,18 @@ func init() {
 		if b.err != nil {
 			return
 		}
-		b.set("NOFLAG", m.flag(0))
+		noflag, err := m.flag(0)
+		if err != nil {
+			b.err = err
+			return
+		}
+		b.set("NOFLAG", noflag)
 		for _, f := range regexFlags {
-			v := m.flag(f.value)
+			v, err := m.flag(f.value)
+			if err != nil {
+				b.err = err
+				return
+			}
 			b.set(f.name, v)
 			if f.short != "" {
 				b.set(f.short, v)
@@ -120,25 +129,11 @@ func init() {
 	})
 }
 
-// latin1Encode is the inverse of latin1Decode: code points 0-255 as
-// bytes.
-func latin1Encode(s string) []byte {
-	out := make([]byte, 0, len(s))
-	for _, r := range s {
-		out = append(out, byte(r))
-	}
-	return out
-}
-
 // ---------------------------------------------------------------- RegexFlag
 
 // flag is the RegexFlag of value v.
-func (m *reModule) flag(v int) Value {
-	f, err := NewInstance(m.flagCls, Int(int64(v)))
-	if err != nil {
-		return Int(int64(v))
-	}
-	return f
+func (m *reModule) flag(v int) (Value, error) {
+	return NewInstance(m.flagCls, Int(int64(v)))
 }
 
 // flagValue is int(v) of a flags argument.
@@ -174,28 +169,36 @@ func flagRepr(v int) string {
 
 func regexFlagMethods(m *reModule) *methods {
 	ms := &methods{}
-	value := func(v Value) int {
-		n, _ := flagValue(v)
-		return n
-	}
 	str := func(args []Value, _ []Keyword) (Value, error) {
-		return String(flagRepr(value(args[0]))), nil
+		v, err := flagValue(args[0])
+		if err != nil {
+			return nil, err
+		}
+		return String(flagRepr(v)), nil
 	}
 	ms.method("__repr__", str)
 	ms.method("__str__", str)
-	ms.method("__format__", func(args []Value, _ []Keyword) (Value, error) {
-		s := String(flagRepr(value(args[0])))
-		if len(args) > 1 {
-			return CallMethod(s, "__format__", args[1])
+	ms.method("__format__", func(args []Value, kwargs []Keyword) (Value, error) {
+		s, err := str(args, kwargs)
+		if err != nil || len(args) < 2 {
+			return s, err
 		}
-		return s, nil
+		return CallMethod(s, "__format__", args[1])
 	})
 	binary := func(name string, f func(a, b int) int) {
 		ms.method(name, func(args []Value, _ []Keyword) (Value, error) {
 			if _, ok := AsInt(args[1]); !ok {
 				return NotImplemented(), nil
 			}
-			return m.flag(f(value(args[0]), value(args[1]))), nil
+			a, err := flagValue(args[0])
+			if err != nil {
+				return nil, err
+			}
+			b, err := flagValue(args[1])
+			if err != nil {
+				return nil, err
+			}
+			return m.flag(f(a, b))
 		})
 	}
 	for _, op := range []struct {
@@ -210,11 +213,21 @@ func regexFlagMethods(m *reModule) *methods {
 		binary(op.names[1], op.f)
 	}
 	ms.method("__invert__", func(args []Value, _ []Keyword) (Value, error) {
-		return m.flag(511 &^ value(args[0])), nil
+		v, err := flagValue(args[0])
+		if err != nil {
+			return nil, err
+		}
+		return m.flag(511 &^ v)
 	})
-	ms.property("value", func(self Value) (Value, error) { return Int(int64(value(self))), nil })
+	ms.property("value", func(self Value) (Value, error) {
+		v, err := flagValue(self)
+		return Int(int64(v)), err
+	})
 	ms.property("name", func(self Value) (Value, error) {
-		v := value(self)
+		v, err := flagValue(self)
+		if err != nil {
+			return nil, err
+		}
 		if v == 0 {
 			return String("NOFLAG"), nil
 		}
@@ -422,19 +435,14 @@ func (st *patternState) subject(v Value) (string, error) {
 		}
 		return s, nil
 	}
-	b, ok := AsBytes(v)
-	if !ok {
-		if ba, err := Call(Builtin("bytes"), []Value{v}, nil); err == nil && TypeName(v) == "bytearray" {
-			b, ok = AsBytes(ba)
-		}
-	}
+	b, ok := bytesOf(unsub(v))
 	if !ok {
 		return "", raise("TypeError", "expected string or bytes-like object, got '%s'", TypeName(v))
 	}
 	if !st.isBytes {
 		return "", raise("TypeError", "cannot use a string pattern on a bytes-like object")
 	}
-	return latin1Decode(b), nil
+	return latin1Decode([]byte(b)), nil
 }
 
 // text makes a result string of the pattern's kind.
@@ -745,7 +753,7 @@ func patternMethods(m *reModule) *methods {
 		if err != nil {
 			return nil, err
 		}
-		r, err := repr(st.pattern)
+		r, err := Repr(st.pattern)
 		if err != nil {
 			return nil, err
 		}
@@ -988,7 +996,7 @@ func matchMethods(m *reModule) *methods {
 		if err != nil {
 			return nil, err
 		}
-		r, err := repr(st.pat.groupValue(st.m, 0, None()))
+		r, err := Repr(st.pat.groupValue(st.m, 0, None()))
 		if err != nil {
 			return nil, err
 		}
@@ -1020,7 +1028,7 @@ func mappingProxyMethods() *methods {
 		})
 	}
 	ms.method("__repr__", func(args []Value, _ []Keyword) (Value, error) {
-		r, err := repr(mapping(args[0]))
+		r, err := Repr(mapping(args[0]))
 		if err != nil {
 			return nil, err
 		}

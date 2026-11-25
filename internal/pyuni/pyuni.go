@@ -14,6 +14,7 @@ package pyuni
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -225,6 +226,19 @@ func finalSigma(rs []rune, i int) bool {
 	return final
 }
 
+// LowerAt is the full lowercase mapping of rs[i] in its context: a U+03A3
+// in the Final_Sigma context lowers to U+03C2, as str.lower and the case
+// mappings of str.title, str.capitalize and str.swapcase lower it.
+func LowerAt(rs []rune, i int) []rune {
+	if rs[i] != 0x3A3 {
+		return LowerRune(rs[i])
+	}
+	if finalSigma(rs, i) {
+		return []rune{0x3C2}
+	}
+	return []rune{0x3C3}
+}
+
 // Lower is str.lower(): the full lowercase mapping with the final-sigma rule.
 func Lower(s string) string {
 	if strings.ContainsRune(s, 0x3A3) {
@@ -278,3 +292,37 @@ func CaseFold(s string) string {
 	}
 	return b.String()
 }
+
+// SplitLines is str.splitlines(keepends) of the UTF-8 text s: it breaks at
+// every character IsLineBreak accepts, reading "\r\n" as one break, and
+// gives no empty last line for a trailing break.
+func SplitLines(s string, keepends bool) []string {
+	out := []string{}
+	for i, j := 0, 0; i < len(s); j = i {
+		var r rune
+		n := 0
+		for i < len(s) {
+			r, n = utf8.DecodeRuneInString(s[i:])
+			if IsLineBreak(r) {
+				break
+			}
+			i += n
+		}
+		eol := i
+		if i < len(s) {
+			if r == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+				i += 2
+			} else {
+				i += n
+			}
+			if keepends {
+				eol = i
+			}
+		}
+		out = append(out, s[j:eol])
+	}
+	return out
+}
+
+// Len is len() of the str s given in UTF-8: its number of code points.
+func Len(s string) int { return utf8.RuneCountInString(s) }

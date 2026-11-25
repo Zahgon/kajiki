@@ -4,6 +4,7 @@ package pyre
 
 import (
 	"fmt"
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 	"strconv"
 	"strings"
 )
@@ -77,17 +78,17 @@ func (p *Pattern) parseTemplate(source string) *template {
 				s.checkgroupname(name, 1)
 				g, ok := p.groupMap[name]
 				if !ok {
-					panic(&PyError{Class: "IndexError", Msg: "unknown group name " + strRepr(name)})
+					panic(&PyError{Class: "IndexError", Msg: "unknown group name " + pyuni.ReprString(name)})
 				}
 				index = g
 			} else {
 				v, err := strconv.ParseUint(name, 10, 64)
 				if err != nil || v >= maxGroups {
-					panic(s.error("invalid group reference "+trimZeros(name), runeLen(name)+1))
+					panic(s.error("invalid group reference "+trimZeros(name), pyuni.Len(name)+1))
 				}
 				index = int(v)
 			}
-			addgroup(index, runeLen(name)+1)
+			addgroup(index, pyuni.Len(name)+1)
 		case c == "0":
 			if isOneOf(s.next, octDigits) {
 				this += s.get()
@@ -95,7 +96,7 @@ func (p *Pattern) parseTemplate(source string) *template {
 					this += s.get()
 				}
 			}
-			v, _ := strconv.ParseInt(this[1:], 8, 64)
+			v := digitsValue(this[1:], 8)
 			literal.WriteRune(rune(v & 0xff))
 		case c != "" && strings.Contains(digits, c):
 			isoctal := false
@@ -105,23 +106,23 @@ func (p *Pattern) parseTemplate(source string) *template {
 					isOneOf(s.next, octDigits) {
 					this += s.get()
 					isoctal = true
-					v, _ := strconv.ParseInt(this[1:], 8, 64)
+					v := digitsValue(this[1:], 8)
 					if v > 0o377 {
-						panic(s.error(fmt.Sprintf("octal escape value %s outside of range 0-0o377", this), runeLen(this)))
+						panic(s.error(fmt.Sprintf("octal escape value %s outside of range 0-0o377", this), pyuni.Len(this)))
 					}
 					literal.WriteRune(rune(v))
 				}
 			}
 			if !isoctal {
-				v, _ := strconv.Atoi(this[1:])
-				addgroup(v, runeLen(this)-1)
+				v := digitsValue(this[1:], 10)
+				addgroup(v, pyuni.Len(this)-1)
 			}
 		default:
 			if r, ok := escapes[this]; ok {
 				literal.WriteRune(r)
 			} else {
 				if strings.Contains(asciiLetters, c) {
-					panic(s.error("bad escape "+this, runeLen(this)))
+					panic(s.error("bad escape "+this, pyuni.Len(this)))
 				}
 				literal.WriteString(this)
 			}

@@ -45,6 +45,8 @@ var interp struct {
 	// depth is the number of Python frames running; recursionLimit is
 	// sys.getrecursionlimit().
 	depth, recursionLimit int
+	// generators is the number of generator objects made so far.
+	generators uint64
 }
 
 // defaultRecursionLimit is sys.getrecursionlimit() at start-up.
@@ -252,10 +254,11 @@ func currentHandled() *excV {
 }
 
 // pushHandled marks x as being handled until the returned function runs.
+// The marks of one body are taken off in the reverse order of putting them
+// on; a generator body's marks move with it between its yields.
 func pushHandled(x *excV) func() {
 	interp.handled = append(interp.handled, x)
-	n := len(interp.handled)
-	return func() { interp.handled = interp.handled[:n-1] }
+	return func() { interp.handled = interp.handled[:len(interp.handled)-1] }
 }
 
 // streamWrite writes text through file.write, as print does.

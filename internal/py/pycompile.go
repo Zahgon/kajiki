@@ -779,8 +779,15 @@ func (c *compileChecker) patternNames(p *Node) ([]string, *syntaxErr) {
 		for i, k := range p.L1 {
 			for _, o := range p.L1[:i] {
 				if k.Kind == "Constant" && o.Kind == "Constant" {
-					if eq, err := pyEq(k.Value, o.Value); err == nil && eq {
-						r, _ := pyRepr(k.Value)
+					eq, err := pyEq(k.Value, o.Value)
+					if err != nil {
+						return nil, &syntaxErr{leaf: err}
+					}
+					if eq {
+						r, err := pyRepr(k.Value)
+						if err != nil {
+							return nil, &syntaxErr{leaf: err}
+						}
 						return nil, errAt(p, "mapping pattern checks duplicate key ("+r+")")
 					}
 				}

@@ -48,23 +48,6 @@ func runMain(path string) programOutcome {
 	return res
 }
 
-// exceptionLine is the last line of the report of an uncaught exception.
-func exceptionLine(exc Value) string {
-	k := classOf(exc)
-	name := k.name
-	if mod := k.moduleName(); mod != "builtins" && mod != "__main__" && mod != "" {
-		name = mod + "." + k.qualName()
-	}
-	text, err := pyStr(exc)
-	if err != nil {
-		text = "<exception str() failed>"
-	}
-	if text == "" {
-		return name
-	}
-	return name + ": " + text
-}
-
 // TestPrograms runs the programs in testdata/programs and compares each
 // outcome with the one CPython recorded (testdata/record.py).
 func TestPrograms(t *testing.T) {

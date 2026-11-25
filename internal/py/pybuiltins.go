@@ -489,9 +489,14 @@ func builtinInt(c *callCtx, args []Value, kw *dictV) (Value, error) {
 			if _, isInt := asInt(r); isInt {
 				return r, nil
 			}
-			n, ierr := methodsIndex(r)
-			if ierr != nil {
+			// PyNumber_Long: a result without __index__ is not Integral;
+			// what __index__ itself raises is passed on.
+			if !hasIndex(r) {
 				return nil, typeErr("__trunc__ returned non-Integral (type %s)", typeName(r))
+			}
+			n, err := methodsIndex(r)
+			if err != nil {
+				return nil, err
 			}
 			return mkBig(n), nil
 		}
@@ -727,7 +732,11 @@ func builtinRound(c *callCtx, args []Value, kw *dictV) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return floatV(roundFloat(f, n)), nil
+		r, err := roundFloat(f, n)
+		if err != nil {
+			return nil, err
+		}
+		return floatV(r), nil
 	}
 	return nil, typeErr("type %s doesn't define __round__ method", num.pyType())
 }
@@ -747,43 +756,47 @@ func roundIntHalfEven(i, digits *big.Int) *big.Int {
 }
 
 // roundFloat is CPython's double_round: x rounded to ndigits decimal places,
-// half to even on the exact binary value.
-func roundFloat(x float64, nd *big.Int) float64 {
+// half to even on the exact binary value, with its OverflowError for a
+// result too large for a float.
+func roundFloat(x float64, nd *big.Int) (float64, error) {
 	if math.IsInf(x, 0) || math.IsNaN(x) || x == 0 {
-		return x
+		return x, nil
 	}
 	if nd.Cmp(big.NewInt(323)) > 0 {
-		return x
+		return x, nil
 	}
 	if nd.Cmp(big.NewInt(-308)) < 0 {
-		return 0.0 * x
+		return 0.0 * x, nil
 	}
-	n := int(nd.Int64())
-	if n >= 0 {
-		// The text FormatFloat writes for a finite x always parses.
-		r, _ := strconv.ParseFloat(strconv.FormatFloat(x, 'f', n, 64), 64)
-		if r == 0 {
-			return math.Copysign(0, x)
+	var res float64
+	if n := int(nd.Int64()); n >= 0 {
+		var err error
+		res, err = strconv.ParseFloat(strconv.FormatFloat(x, 'f', n, 64), 64)
+		if err != nil {
+			return 0, newPyErr("OverflowError", "rounded value too large to represent")
 		}
-		return r
+	} else {
+		exact, _ := new(big.Float).SetPrec(2000).SetFloat64(x).Int(nil)
+		rem := new(big.Float).SetPrec(2000).Sub(new(big.Float).SetPrec(2000).SetFloat64(x), new(big.Float).SetPrec(2000).SetInt(exact))
+		pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(-n)), nil)
+		q, r := intFloorDivMod(exact, pow)
+		// compare 2*(r + rem) with pow
+		twice := new(big.Float).SetPrec(2000).SetInt(r)
+		twice.Add(twice, rem)
+		twice.Mul(twice, big.NewFloat(2))
+		c := twice.Cmp(new(big.Float).SetPrec(2000).SetInt(pow))
+		if c > 0 || c == 0 && q.Bit(0) == 1 {
+			q.Add(q, big.NewInt(1))
+		}
+		res, _ = new(big.Float).SetInt(q.Mul(q, pow)).Float64()
+		if math.IsInf(res, 0) {
+			return 0, newPyErr("OverflowError", "rounded value too large to represent")
+		}
 	}
-	exact, _ := new(big.Float).SetPrec(2000).SetFloat64(x).Int(nil)
-	rem := new(big.Float).SetPrec(2000).Sub(new(big.Float).SetPrec(2000).SetFloat64(x), new(big.Float).SetPrec(2000).SetInt(exact))
-	pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(-n)), nil)
-	q, r := intFloorDivMod(exact, pow)
-	// compare 2*(r + rem) with pow
-	twice := new(big.Float).SetPrec(2000).SetInt(r)
-	twice.Add(twice, rem)
-	twice.Mul(twice, big.NewFloat(2))
-	c := twice.Cmp(new(big.Float).SetPrec(2000).SetInt(pow))
-	if c > 0 || c == 0 && q.Bit(0) == 1 {
-		q.Add(q, big.NewInt(1))
-	}
-	res, _ := new(big.Float).SetInt(q.Mul(q, pow)).Float64()
 	if res == 0 {
-		return math.Copysign(0, x)
+		return math.Copysign(0, x), nil
 	}
-	return res
+	return res, nil
 }
 
 func minMax(name, op string) func(c *callCtx, args []Value, kw *dictV) (Value, error) {

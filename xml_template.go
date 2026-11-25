@@ -319,8 +319,7 @@ type compiler struct {
 	filename     string
 	doc          *node
 	isFragment   bool
-	functions    []string
-	bodies       map[string][]irNode
+	functions    functionTable
 	modPy        []*pythonNode
 	autoblocks   []string
 	cdataScripts bool
@@ -331,8 +330,8 @@ type compiler struct {
 
 func newCompiler(filename string, doc *node, opts xmlCompileOptions) *compiler {
 	c := &compiler{filename: filename, doc: doc, isFragment: opts.isFragment, autoblocks: opts.autoblocks,
-		cdataScripts: opts.cdataScripts, bodies: map[string][]irNode{}}
-	c.setFunction("__main__()", nil)
+		cdataScripts: opts.cdataScripts}
+	c.functions.set("__main__()", nil)
 	switch dtd := matchingDoctype(doc.dtd); {
 	case opts.mode != "":
 		c.mode = opts.mode
@@ -342,15 +341,6 @@ func newCompiler(filename string, doc *node, opts xmlCompileOptions) *compiler {
 		c.mode = "xml"
 	}
 	return c
-}
-
-// setFunction sets a function's body, keeping the place of a function
-// defined before.
-func (c *compiler) setFunction(decl string, body []irNode) {
-	if _, ok := c.bodies[decl]; !ok {
-		c.functions = append(c.functions, decl)
-	}
-	c.bodies[decl] = body
 }
 
 // compile is _Compiler.compile.
@@ -379,12 +369,8 @@ func (c *compiler) compile() (*templateNode, error) {
 			body = slices.Insert(body, 0, irNode(t))
 		}
 	}
-	c.setFunction("__main__()", body)
-	defs := make([]irNode, len(c.functions))
-	for i, decl := range c.functions {
-		defs[i] = newDefNode(decl, c.bodies[decl])
-	}
-	tree := newTemplateNode(c.modPy, defs)
+	c.functions.set("__main__()", body)
+	tree := newTemplateNode(c.modPy, c.functions.defs())
 	tree.filename = c.filename
 	return tree, nil
 }
@@ -696,10 +682,10 @@ func (c *compiler) compileBlock(n *node, emit emitFn) error {
 			return err
 		}
 		body = slices.Insert(body, 0, irNode(p))
-		c.setFunction(decl, body)
+		c.functions.set(decl, body)
 		return nil
 	}
-	c.setFunction(decl, body)
+	c.functions.set(decl, body)
 	return c.annotated(n, emit)(&exprNode{text: decl})
 }
 
@@ -718,7 +704,7 @@ func (c *compiler) compileDef(n *node, emit emitFn) error {
 		d.inner = true
 		return c.annotated(n, emit)(d)
 	}
-	c.setFunction(attribute(n, "function"), body)
+	c.functions.set(attribute(n, "function"), body)
 	return nil
 }
 
@@ -1012,7 +998,7 @@ func (tc *textCompiler) slice(from, to int) []rune {
 // the text.
 func (tc *textCompiler) bracedExpr() (irNode, error) {
 	rest := string(tc.slice(tc.pos, len(tc.source)))
-	tc.pos += runeLen(rest) - runeLen(lstrip(rest))
+	tc.pos += pyuni.Len(rest) - pyuni.Len(lstrip(rest))
 	rest = string(tc.slice(tc.pos, len(tc.source)))
 	_, err := py.Compile(rest, "find_}", "eval")
 	if err == nil {
@@ -1027,9 +1013,9 @@ func (tc *textCompiler) bracedExpr() (irNode, error) {
 		return nil, err
 	}
 	end := tc.pos + offset
-	for idx, line := range splitLines(rest) {
+	for idx, line := range pyuni.SplitLines(rest, false) {
 		if idx < lineno-1 {
-			end += runeLen(line) + 1
+			end += pyuni.Len(line) + 1
 		}
 	}
 	whole := []rune(rest)

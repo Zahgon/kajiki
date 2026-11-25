@@ -80,7 +80,7 @@ func (d *dequeState) extend(self, iterable Value, left bool) error {
 	var err error
 	if Is(self, iterable) {
 		items = append([]Value(nil), d.items...)
-	} else if items, err = listOf(iterable); err != nil {
+	} else if items, err = ToList(iterable); err != nil {
 		return err
 	}
 	for _, v := range items {
@@ -320,7 +320,7 @@ func dequeMethods(iterCls Value) *methods {
 				return Int(int64(i)), nil
 			}
 		}
-		r, err := repr(args[1])
+		r, err := Repr(args[1])
 		if err != nil {
 			return nil, err
 		}
@@ -446,7 +446,7 @@ func dequeMethods(iterCls Value) *methods {
 	noArgs("__iter__", iterOver(false))
 	noArgs("__reversed__", iterOver(true))
 	noArgs("__repr__", func(d *dequeState, s Value) (Value, error) {
-		items, err := repr(List(d.items...))
+		items, err := Repr(List(d.items...))
 		if err != nil {
 			return nil, err
 		}
@@ -568,7 +568,7 @@ func defaultdictMethods() *methods {
 		}
 		return v, SetItem(args[0], args[1], v)
 	})
-	ms.add("default_factory", mustProperty(
+	ms.getset("default_factory",
 		func(args []Value, _ []Keyword) (Value, error) {
 			f, err := factoryOf(args[0])
 			if err != nil {
@@ -583,7 +583,7 @@ func defaultdictMethods() *methods {
 			}
 			f.factory = args[1]
 			return nil, nil
-		}))
+		})
 	ms.method("__repr__", func(args []Value, _ []Keyword) (Value, error) {
 		f, err := factoryOf(args[0])
 		if err != nil {
@@ -591,7 +591,7 @@ func defaultdictMethods() *methods {
 		}
 		fr := "None"
 		if !IsNone(f.factory) {
-			if fr, err = repr(f.factory); err != nil {
+			if fr, err = Repr(f.factory); err != nil {
 				return nil, err
 			}
 		}
@@ -624,23 +624,13 @@ func defaultdictMethods() *methods {
 	return ms
 }
 
-// mustProperty is property(fget, fset) of two Go functions; building it
-// cannot fail.
-func mustProperty(get, set fn) Value {
-	p, err := Call(Builtin("property"), []Value{Func("fget", get), Func("fset", set)}, nil)
-	if err != nil {
-		return None()
-	}
-	return p
-}
-
 // baseDictRepr is dict.__repr__(v) for a dict or an instance of a subclass.
 func baseDictRepr(v Value) (string, error) {
 	base := v
 	if b, ok := BaseValue(v); ok {
 		base = b
 	}
-	return repr(base)
+	return Repr(base)
 }
 
 // dictKeys is list(d) of a dict or an instance of a subclass, without
@@ -687,7 +677,7 @@ func orderedDictMethods() *methods {
 		}
 		last := true
 		if buf[1] != nil {
-			if last, err = truth(buf[1]); err != nil {
+			if last, err = Truth(buf[1]); err != nil {
 				return nil, err
 			}
 		}
@@ -723,7 +713,7 @@ func orderedDictMethods() *methods {
 		}
 		last := true
 		if buf[0] != nil {
-			if last, err = truth(buf[0]); err != nil {
+			if last, err = Truth(buf[0]); err != nil {
 				return nil, err
 			}
 		}
@@ -791,7 +781,7 @@ func counterMethods() *methods {
 		if _, err := CallSuper(TypeOf(args[0]), args[0], "__init__", nil, nil); err != nil {
 			return nil, err
 		}
-		return callMethodKw(args[0], "update", args[1:], kwargs)
+		return CallMethodKw(args[0], "update", args[1:], kwargs)
 	})
 	ms.method("__missing__", func(args []Value, _ []Keyword) (Value, error) { return Int(0), nil })
 	ms.method("total", func(args []Value, _ []Keyword) (Value, error) {
@@ -873,7 +863,7 @@ func counterMethods() *methods {
 			}
 			d = baseOrSelf(args[0])
 		}
-		s, err := repr(d)
+		s, err := Repr(d)
 		if err != nil {
 			return nil, err
 		}
@@ -996,7 +986,11 @@ func counterUpdate(args []Value, kwargs []Keyword, sub bool) error {
 	}
 	if len(args) == 2 && !IsNone(args[1]) {
 		src := args[1]
-		if hasMappingMethods(src) {
+		mapping, err := hasMappingMethods(src)
+		if err != nil {
+			return err
+		}
+		if mapping {
 			if !sub && len(dictKeys(self)) == 0 && IsDict(baseOrSelf(src)) {
 				if _, err := CallSuper(TypeOf(self), self, "update", []Value{src}, nil); err != nil {
 					return err
@@ -1006,8 +1000,8 @@ func counterUpdate(args []Value, kwargs []Keyword, sub bool) error {
 				if err != nil {
 					return err
 				}
-				if err := iterate(items, func(p Value) error {
-					kv, err := listOf(p)
+				if err := ForEach(items, func(p Value) error {
+					kv, err := ToList(p)
 					if err != nil {
 						return err
 					}
@@ -1016,7 +1010,7 @@ func counterUpdate(args []Value, kwargs []Keyword, sub bool) error {
 					return err
 				}
 			}
-		} else if err := iterate(src, func(k Value) error { return add(k, Int(1)) }); err != nil {
+		} else if err := ForEach(src, func(k Value) error { return add(k, Int(1)) }); err != nil {
 			return err
 		}
 	}
@@ -1029,29 +1023,24 @@ func counterUpdate(args []Value, kwargs []Keyword, sub bool) error {
 }
 
 // hasMappingMethods is isinstance(v, collections.abc.Mapping) for the values the
-// programs pass: dicts and objects with keys and __getitem__.
-func hasMappingMethods(v Value) bool {
+// programs pass: dicts and objects with keys and items.
+func hasMappingMethods(v Value) (bool, error) {
 	if IsDict(baseOrSelf(v)) {
-		return true
+		return true, nil
 	}
-	hasKeys, _ := HasAttr(v, "keys")
-	hasItems, _ := HasAttr(v, "items")
-	return hasKeys && hasItems
+	for _, name := range []string{"keys", "items"} {
+		if has, err := HasAttr(v, name); err != nil || !has {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
-// isCounter is isinstance(v, collections.Counter).
+// isCounter is isinstance(v, collections.Counter): whether collections'
+// Counter is in the method resolution order of v's class.
 func isCounter(v Value) bool {
-	mro, err := GetAttr(TypeOf(v), "__mro__")
-	if err != nil {
-		return false
-	}
-	items, _ := SeqItems(mro)
-	for _, k := range items {
-		if ClassName(k) != "Counter" {
-			continue
-		}
-		mod, err := GetAttr(k, "__module__")
-		if s, ok := AsString(mod); err == nil && ok && s == "collections" {
+	for _, k := range classOf(v).mroList() {
+		if k.name == "Counter" && k.moduleName() == "collections" {
 			return true
 		}
 	}
@@ -1251,7 +1240,7 @@ func chainMapMethods() *methods {
 		if err != nil {
 			return nil, err
 		}
-		return listOf(m)
+		return ToList(m)
 	}
 	ms.method("__init__", func(args []Value, kwargs []Keyword) (Value, error) {
 		if err := NoKeywords("ChainMap", kwargs); err != nil {
@@ -1303,7 +1292,7 @@ func chainMapMethods() *methods {
 		}
 		d := EmptyDict()
 		for i := len(ms) - 1; i >= 0; i-- {
-			if err := iterate(ms[i], func(k Value) error { return SetItem(d, k, None()) }); err != nil {
+			if err := ForEach(ms[i], func(k Value) error { return SetItem(d, k, None()) }); err != nil {
 				return nil, err
 			}
 		}
@@ -1340,7 +1329,7 @@ func chainMapMethods() *methods {
 			return nil, err
 		}
 		for _, m := range ms {
-			t, err := truth(m)
+			t, err := Truth(m)
 			if err != nil || t {
 				return Bool(t), err
 			}
@@ -1410,7 +1399,7 @@ func chainMapMethods() *methods {
 			if !ErrorIs(err, "KeyError") {
 				return nil, err
 			}
-			r, rerr := repr(args[1])
+			r, rerr := Repr(args[1])
 			if rerr != nil {
 				return nil, rerr
 			}
@@ -1461,7 +1450,7 @@ func namedtuple(args []Value, kwargs []Keyword) (Value, error) {
 			fieldVals = append(fieldVals, String(f))
 		}
 	} else {
-		items, err := listOf(buf[1])
+		items, err := ToList(buf[1])
 		if err != nil {
 			return nil, err
 		}
@@ -1479,7 +1468,7 @@ func namedtuple(args []Value, kwargs []Keyword) (Value, error) {
 	}
 	rename := false
 	if buf[2] != nil {
-		if rename, err = truth(buf[2]); err != nil {
+		if rename, err = Truth(buf[2]); err != nil {
 			return nil, err
 		}
 	}
@@ -1493,7 +1482,7 @@ func namedtuple(args []Value, kwargs []Keyword) (Value, error) {
 		}
 	}
 	for _, name := range append([]string{typename}, fields...) {
-		r, err := repr(String(name))
+		r, err := Repr(String(name))
 		if err != nil {
 			return nil, err
 		}
@@ -1506,7 +1495,7 @@ func namedtuple(args []Value, kwargs []Keyword) (Value, error) {
 	}
 	seen := map[string]bool{}
 	for _, name := range fields {
-		r, err := repr(String(name))
+		r, err := Repr(String(name))
 		if err != nil {
 			return nil, err
 		}
@@ -1521,7 +1510,7 @@ func namedtuple(args []Value, kwargs []Keyword) (Value, error) {
 	var defaults []Value
 	fieldDefaults := EmptyDict()
 	if buf[3] != nil && !IsNone(buf[3]) {
-		if defaults, err = listOf(buf[3]); err != nil {
+		if defaults, err = ToList(buf[3]); err != nil {
 			return nil, err
 		}
 		if len(defaults) > len(fields) {
@@ -1538,8 +1527,15 @@ func namedtuple(args []Value, kwargs []Keyword) (Value, error) {
 	if module == nil || IsNone(module) {
 		module = String("__main__")
 		if g := CallerGlobals(); g != nil {
-			if name, err := GetItem(g, String("__name__")); err == nil {
+			// The caller's module name; globals without __name__ leave
+			// '__main__', as the `or '__main__'` after
+			// sys._getframemodulename(1) in namedtuple does.
+			name, err := GetItem(g, String("__name__"))
+			switch {
+			case err == nil:
 				module = name
+			case !ErrorIs(err, "KeyError"):
+				return nil, err
 			}
 		}
 	}
@@ -1647,7 +1643,7 @@ func makeNamedtuple(typename string, fields []string, defaults []Value, fieldDef
 			}
 		}
 		if len(extra) > 0 {
-			r, err := repr(List(extra...))
+			r, err := Repr(List(extra...))
 			if err != nil {
 				return nil, err
 			}
@@ -1659,7 +1655,7 @@ func makeNamedtuple(typename string, fields []string, defaults []Value, fieldDef
 		values, _ := SeqItems(baseOrSelf(args[0]))
 		parts := make([]string, len(values))
 		for i, v := range values {
-			r, err := repr(v)
+			r, err := Repr(v)
 			if err != nil {
 				return nil, err
 			}
@@ -1708,9 +1704,6 @@ func makeNamedtuple(typename string, fields []string, defaults []Value, fieldDef
 		f, err := GetAttr(cls, m)
 		if err != nil {
 			return nil, err
-		}
-		if fn, err := GetAttr(f, "__func__"); err == nil {
-			f = fn
 		}
 		if err := SetAttr(f, "__qualname__", String(typename+"."+m)); err != nil {
 			return nil, err

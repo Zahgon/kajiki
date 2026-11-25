@@ -91,6 +91,20 @@ func hasSlot(v Value, name string) bool {
 	return slotsOf(v)[name]
 }
 
+// hasIndex is PyIndex_Check: whether the type of v defines __index__.
+func hasIndex(v Value) bool {
+	if k := userClassOf(v); k != nil {
+		if _, ok := k.lookupUser("__index__"); ok {
+			return true
+		}
+		if x, ok := v.(*instV); ok && x.base != nil {
+			return hasSlot(x.base, "__index__")
+		}
+		return false
+	}
+	return hasSlot(v, "__index__")
+}
+
 // isSlotName reports whether name is a special method some builtin type
 // implements through a slot, which its class shows as a slot wrapper.
 func isSlotName(name string) bool {

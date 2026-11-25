@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackrosenthal/kajiki-go/internal/py"
 	"github.com/jackrosenthal/kajiki-go/internal/pyre"
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 )
 
 // textPattern is text._pattern: the starts of expressions and tags.
@@ -182,9 +183,9 @@ func (s *scanner) nextToken() (tok *textToken, ok bool, err error) {
 		if !matched(m, textBraced) && !matched(m, textNamed) && !matched(m, textEscaped) &&
 			!matched(m, textTagBare) && !matched(m, textTagBegin) && !matched(m, textTagBeginLjust) {
 			var b strings.Builder
-			fmt.Fprintf(&b, "Syntax error %s:%d", s.filename, s.lineno)
-			for i, line := range splitLines(string(s.source)) {
-				fmt.Fprintf(&b, "%3d %s\n", i+1, line)
+			b.WriteString(fmt.Sprintf("Syntax error %s:%d", s.filename, s.lineno))
+			for i, line := range pyuni.SplitLines(string(s.source), false) {
+				b.WriteString(fmt.Sprintf("%3d %s\n", i+1, line))
 			}
 			return nil, false, py.Raise("SyntaxError", py.String(b.String()))
 		}
@@ -230,7 +231,7 @@ func (s *scanner) find(sub string, from int) int {
 	if i < 0 {
 		return -1
 	}
-	return from + runeLen(string(s.source[from:])[:i])
+	return from + pyuni.Len(string(s.source[from:])[:i])
 }
 
 // tagBare is _get_tag_bare: a tag that runs to the end of its line.
@@ -343,8 +344,7 @@ func nodesOf(body []bodyItem) []irNode {
 type textParser struct {
 	scanner    *scanner
 	pushed     []*textToken
-	functions  []string
-	bodies     map[string][]irNode
+	functions  functionTable
 	modPy      []*pythonNode
 	autoescape bool
 	inDef      bool
@@ -352,16 +352,9 @@ type textParser struct {
 }
 
 func newTextParser(s *scanner, autoescape bool) *textParser {
-	p := &textParser{scanner: s, autoescape: autoescape, bodies: map[string][]irNode{}}
-	p.setFunction("__main__()", nil)
+	p := &textParser{scanner: s, autoescape: autoescape}
+	p.functions.set("__main__()", nil)
 	return p
-}
-
-func (p *textParser) setFunction(decl string, body []irNode) {
-	if _, ok := p.bodies[decl]; !ok {
-		p.functions = append(p.functions, decl)
-	}
-	p.bodies[decl] = body
 }
 
 func (p *textParser) parse() (*templateNode, error) {
@@ -369,12 +362,8 @@ func (p *textParser) parse() (*templateNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.setFunction("__main__()", nodesOf(body))
-	defs := make([]irNode, len(p.functions))
-	for i, decl := range p.functions {
-		defs[i] = newDefNode(decl, p.bodies[decl])
-	}
-	return newTemplateNode(p.modPy, defs), nil
+	p.functions.set("__main__()", nodesOf(body))
+	return newTemplateNode(p.modPy, p.functions.defs()), nil
 }
 
 // pull is next(self.iterator): a token pushed back first.
@@ -514,7 +503,7 @@ func (p *textParser) parseDef(tok *textToken) (irNode, error) {
 		d.inner = true
 		return d, nil
 	}
-	p.setFunction(strip(tok.body), nodesOf(body))
+	p.functions.set(strip(tok.body), nodesOf(body))
 	return nil, nil
 }
 
@@ -703,10 +692,10 @@ func (p *textParser) parseBlock(tok *textToken) (irNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.setFunction(decl, append([]irNode{n}, body...))
+		p.functions.set(decl, append([]irNode{n}, body...))
 		return nil, nil
 	}
-	p.setFunction(decl, body)
+	p.functions.set(decl, body)
 	e := &exprNode{text: decl}
 	return e, nil
 }

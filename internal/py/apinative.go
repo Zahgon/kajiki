@@ -208,7 +208,7 @@ func CompareOp(op string, a, b Value) (Value, error) {
 // defines for name, and whether it does. For a builtin class the names are
 // those of CPython's type dict; the __hash__ of an unhashable type is None,
 // and the value is nil for a slot the runtime does not expose as an
-// attribute.
+// attribute (reading it raises AttributeError).
 func OwnAttr(cls Value, name string) (Value, bool) {
 	k, ok := cls.(*classV)
 	if !ok {
@@ -224,11 +224,14 @@ func OwnAttr(cls Value, name string) (Value, bool) {
 		if name == "__hash__" && unhashableTypes[k.name] {
 			return none, true
 		}
-		v, err := pyGetattr(k, name)
-		if err != nil {
-			// The class defines name, but as a slot this runtime does not
-			// expose as an attribute.
-			return nil, true
+		// A builtin class has no Python code that could raise anything else.
+		v, ok := classAttr(k, name)
+		if !ok {
+			if v, ok = classGetattr(k, name); !ok {
+				// The class defines name, but as a slot this runtime does
+				// not expose as an attribute.
+				return nil, true
+			}
 		}
 		return v, true
 	}

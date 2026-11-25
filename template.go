@@ -5,7 +5,6 @@
 package kajiki
 
 import (
-	"fmt"
 	"strings"
 	"sync"
 
@@ -150,7 +149,7 @@ func templateInit(self, context py.Value) error {
 	if err != nil {
 		return err
 	}
-	err = iterate(methods, func(m py.Value) error {
+	err = py.ForEach(methods, func(m py.Value) error {
 		k, v, err := unpackPair(m)
 		if err != nil {
 			return err
@@ -208,50 +207,13 @@ func templateInit(self, context py.Value) error {
 	return py.SetItem(g, py.String("value_of"), get)
 }
 
-// iterate is a for loop over a Python iterable.
-func iterate(v py.Value, body func(py.Value) error) error {
-	it, err := py.Iter(v)
-	if err != nil {
-		return err
-	}
-	for {
-		x, ok, err := it.Next()
-		if err != nil || !ok {
-			return err
-		}
-		if err := body(x); err != nil {
-			return err
-		}
-	}
-}
-
 // unpackPair is `k, v = item` with Python's errors.
 func unpackPair(item py.Value) (k, v py.Value, err error) {
-	it, err := py.Iter(item)
+	vals, err := py.Unpack(item, 2)
 	if err != nil {
-		if py.ErrorIs(err, "TypeError") && !py.HasIter(item) {
-			return nil, nil, py.Raise("TypeError", py.String("cannot unpack non-iterable "+py.TypeName(item)+" object"))
-		}
 		return nil, nil, err
 	}
-	var got []py.Value
-	for len(got) < 3 {
-		x, ok, err := it.Next()
-		if err != nil {
-			return nil, nil, err
-		}
-		if !ok {
-			break
-		}
-		got = append(got, x)
-	}
-	switch {
-	case len(got) < 2:
-		return nil, nil, py.Raise("ValueError", py.String(fmt.Sprintf("not enough values to unpack (expected 2, got %d)", len(got))))
-	case len(got) > 2:
-		return nil, nil, py.Raise("ValueError", py.String("too many values to unpack (expected 2)"))
-	}
-	return got[0], got[1], nil
+	return vals[0], vals[1], nil
 }
 
 // templateIter is _Template.__iter__, a generator: str() of each chunk of
@@ -296,7 +258,7 @@ func render(self py.Value, _ []py.Value) (py.Value, error) {
 
 func pushWith(self py.Value, a []py.Value) (py.Value, error) {
 	var saved []py.Value
-	err := iterate(a[1], func(k py.Value) error {
+	err := py.ForEach(a[1], func(k py.Value) error {
 		v, err := py.CallMethod(a[0], "get", k, py.Tuple())
 		saved = append(saved, v)
 		return err
@@ -461,7 +423,7 @@ func templateFuncsIn(d py.Value, fn func(k, v py.Value) error) error {
 	if err != nil {
 		return err
 	}
-	return iterate(items, func(item py.Value) error {
+	return py.ForEach(items, func(item py.Value) error {
 		k, v, err := unpackPair(item)
 		if err != nil {
 			return err
@@ -608,7 +570,7 @@ func renderAttr(self, item, mode py.Value) (py.Value, error) {
 // left.
 func collectParts(_ py.Value, a []py.Value) (py.Value, error) {
 	var result []string
-	err := iterate(a[0], func(part py.Value) error {
+	err := py.ForEach(a[0], func(part py.Value) error {
 		if py.IsNone(part) {
 			return nil
 		}
@@ -834,8 +796,9 @@ func globalName(g py.Value, name string) (py.Value, error) {
 	} else if in {
 		return py.GetItem(g, key)
 	}
-	if v, err := py.GetAttr(py.BuiltinsModule(), name); err == nil {
-		return v, nil
+	v, err := py.GetAttr(py.BuiltinsModule(), name)
+	if err == nil || !py.ErrorIs(err, "AttributeError") {
+		return v, err
 	}
 	return nil, py.Raise("NameError", py.String("name '"+name+"' is not defined"))
 }
@@ -919,7 +882,7 @@ func annotateLnotab(tpl py.Value, filename string, linenos []lineMapping) error 
 	if err != nil {
 		return err
 	}
-	return iterate(methods, func(m py.Value) error {
+	return py.ForEach(methods, func(m py.Value) error {
 		_, tf, err := unpackPair(m)
 		if err != nil {
 			return err

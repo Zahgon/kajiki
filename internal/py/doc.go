@@ -56,11 +56,24 @@
 //
 // The operations are Python's: Repr, Str, TypeName, Truth, Len, Equal, Hash,
 // GetAttr, HasAttr, SetAttr, GetItem, SetItem, DelItem, Contains, Call,
-// CallMethod, BinaryOp, Compare, RichCompare, Iter (an Iterator) and ToList;
+// CallMethod, BinaryOp, Compare, RichCompare, Iter (an Iterator), ForEach,
+// ToList and Unpack (`a, b = v`); TypeCheck is PyObject_TypeCheck;
 // Builtin(name) is a builtin function, class or constant. The inspections
 // are AsString (str and its subclasses), IsNumber, AsInt, AsFloat, AsBool,
 // IsNone, IsCallable, IsFunction, IsDict, IsList, IsTuple, SeqItems and
 // DictItems.
+//
+// # Generators
+//
+// A generator's body runs as a coroutine (iter.Pull2) and keeps its own
+// exception state, as CPython's frames do. A generator object that nothing
+// refers to any more while its body is paused has the body ended once it is
+// collected, without running any of its Python code: CPython runs the
+// finally blocks when the last reference goes away, which this runtime
+// cannot tell, so they do not run rather than run at another point. A
+// generator a for loop made itself (by calling a generator function or as a
+// generator expression in its iterable) is closed when the loop is left
+// early, as CPython's reference counting closes it there.
 //
 // # Functions and code objects
 //

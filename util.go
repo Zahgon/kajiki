@@ -21,13 +21,19 @@ func method(module, class, name string, params []string, body func(bound []py.Va
 // newClass makes the class name of module kajiki.<module> with the
 // attributes attrs, deriving from object.
 func newClass(module, name string, attrs map[string]py.Value) py.Value {
+	return subclass(module, name, py.Builtin("object"), attrs)
+}
+
+// subclass makes the class name of module kajiki.<module> deriving from
+// base, with the attributes attrs.
+func subclass(module, name string, base py.Value, attrs map[string]py.Value) py.Value {
 	names := []string{"__module__"}
 	values := []py.Value{py.String("kajiki." + module)}
 	for k, v := range attrs {
 		names = append(names, k)
 		values = append(values, v)
 	}
-	cls, err := py.NewClass(name, []py.Value{py.Builtin("object")}, py.StrDict(names, values))
+	cls, err := py.NewClass(name, []py.Value{base}, py.StrDict(names, values))
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +58,7 @@ func flattenerMethods() map[string]py.Value {
 	return map[string]py.Value{
 		"__init__": method("util", "flattener", "__init__", []string{"self", "iterator"},
 			func(a []py.Value) (py.Value, error) { return nil, initFlattener(a[0], a[1]) }),
-		"decorate": classMethod(method("util", "flattener", "decorate", []string{"cls", "func"},
+		"decorate": wrapIn("classmethod", method("util", "flattener", "decorate", []string{"cls", "func"},
 			func(a []py.Value) (py.Value, error) { return decorate(a[0], a[1]), nil })),
 		"accumulate_str": method("util", "flattener", "accumulate_str", []string{"self"},
 			func(a []py.Value) (py.Value, error) { return accumulateStr(a[0]) }),
@@ -61,12 +67,14 @@ func flattenerMethods() map[string]py.Value {
 	}
 }
 
-func classMethod(fn py.Value) py.Value {
-	cm, err := py.Call(py.Builtin("classmethod"), []py.Value{fn}, nil)
+// wrapIn is the builtin descriptor class named desc (classmethod,
+// property) around fn.
+func wrapIn(desc string, fn py.Value) py.Value {
+	d, err := py.Call(py.Builtin(desc), []py.Value{fn}, nil)
 	if err != nil {
 		panic(err)
 	}
-	return cm
+	return d
 }
 
 // isFlattener is type(v) == flattener.

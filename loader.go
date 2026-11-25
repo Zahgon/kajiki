@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackrosenthal/kajiki-go/internal/py"
-	"github.com/jackrosenthal/kajiki-go/internal/pyre"
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 )
 
 // A loader's cache (modules) and reload flag (_reload) are Python
@@ -50,38 +50,15 @@ func init() {
 				}
 				return py.String(defaultAliasFor(name)), nil
 			}),
-		"load": property(method("loader", "Loader", "load", []string{"self"},
+		"load": wrapIn("property", method("loader", "Loader", "load", []string{"self"},
 			func(a []py.Value) (py.Value, error) { return py.GetAttr(a[0], "import_") })),
 	})
-	mockLoaderClass = subclass("MockLoader", loaderClass, nil)
-	fileLoaderClass = subclass("FileLoader", loaderClass, map[string]py.Value{
+	mockLoaderClass = subclass("loader", "MockLoader", loaderClass, nil)
+	fileLoaderClass = subclass("loader", "FileLoader", loaderClass, map[string]py.Value{
 		"_load": py.NewFunction(py.FuncSpec{Name: "_load", Qualname: "FileLoader._load", Module: "kajiki.loader",
 			Params: []string{"self", "name", "encoding"}, Defaults: []py.Value{py.String("utf-8")}, VarKw: "kwargs"},
 			fileLoad),
 	})
-}
-
-func property(fn py.Value) py.Value {
-	p, err := py.Call(py.Builtin("property"), []py.Value{fn}, nil)
-	if err != nil {
-		panic(err)
-	}
-	return p
-}
-
-// subclass makes the class name of kajiki.loader deriving from base.
-func subclass(name string, base py.Value, attrs map[string]py.Value) py.Value {
-	names := []string{"__module__"}
-	values := []py.Value{py.String("kajiki.loader")}
-	for k, v := range attrs {
-		names = append(names, k)
-		values = append(values, v)
-	}
-	cls, err := py.NewClass(name, []py.Value{base}, py.StrDict(names, values))
-	if err != nil {
-		panic(err)
-	}
-	return cls
 }
 
 // newLoader is Loader.__init__(reload) for an instance of cls, with the Go
@@ -123,7 +100,7 @@ func newMockLoader(modules py.Value) (py.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	return l, iterate(values, func(v py.Value) error { return py.SetAttr(v, "loader", l) })
+	return l, py.ForEach(values, func(v py.Value) error { return py.SetAttr(v, "loader", l) })
 }
 
 // loaderImport is Loader.import_: the cached template unless the loader
@@ -255,13 +232,18 @@ func xmlTemplateCall(source, filename, mode string, autoblocks []string, options
 func (fl *fileLoader) findResource(name string) (string, error) {
 	for _, base := range fl.path {
 		p := joinPath(base, name)
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+		// os.path.exists is false for a path os.stat fails on.
+		fi, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		if fi.Mode().IsRegular() {
 			return p, nil
 		}
 	}
 	parts := make([]string, len(fl.path))
 	for i, p := range fl.path {
-		parts[i] = pyre.StrRepr(p)
+		parts[i] = pyuni.ReprString(p)
 	}
 	return "", py.Raise("FileNotFoundError", py.String(name+" not found in any of ["+strings.Join(parts, ", ")+"]"))
 }

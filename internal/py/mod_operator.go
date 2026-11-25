@@ -51,11 +51,11 @@ func init() {
 			def(u.name, unaryOperator(u.name, func(v Value) (Value, error) { return UnaryOp(op, v) }), true)
 		}
 		def("not_", unaryOperator("not_", func(v Value) (Value, error) {
-			t, err := truth(v)
+			t, err := Truth(v)
 			return Bool(!t), err
 		}), true)
 		def("truth", unaryOperator("truth", func(v Value) (Value, error) {
-			t, err := truth(v)
+			t, err := Truth(v)
 			return Bool(t), err
 		}), false)
 		def("abs", unaryOperator("abs", func(v Value) (Value, error) { return call(Builtin("abs"), v) }), true)
@@ -89,7 +89,7 @@ func init() {
 		}, true)
 		def("countOf", binaryOperator("countOf", func(a, c Value) (Value, error) {
 			n := 0
-			err := iterate(a, func(item Value) error {
+			err := ForEach(a, func(item Value) error {
 				eq := Is(item, c)
 				if !eq {
 					var err error
@@ -161,7 +161,7 @@ func concat(a, b Value) (Value, error) {
 func indexOf(a, b Value) (Value, error) {
 	i := 0
 	found := -1
-	err := iterate(a, func(item Value) error {
+	err := ForEach(a, func(item Value) error {
 		if found >= 0 {
 			return nil
 		}
@@ -207,7 +207,11 @@ func lengthHint(args []Value, kwargs []Keyword) (Value, error) {
 	} else if !ErrorIs(err, "TypeError") {
 		return nil, err
 	}
-	if has, err := HasAttr(TypeOf(args[0]), "__length_hint__"); err == nil && has {
+	has, err := HasAttr(TypeOf(args[0]), "__length_hint__")
+	if err != nil {
+		return nil, err
+	}
+	if has {
 		r, err := CallMethod(args[0], "__length_hint__")
 		if err != nil {
 			return nil, err
@@ -265,7 +269,7 @@ func (b *builder) iterlessClass(name string, newFn func(args []Value, kwargs []K
 func joinReprs(vs []Value) (string, error) {
 	parts := make([]string, len(vs))
 	for i, v := range vs {
-		s, err := repr(v)
+		s, err := Repr(v)
 		if err != nil {
 			return "", err
 		}
@@ -372,20 +376,20 @@ func newMethodcaller(args []Value, kwargs []Keyword) (*getterState, error) {
 		},
 		repr: func() (string, error) {
 			parts := []string{}
-			r, err := repr(args[0])
+			r, err := Repr(args[0])
 			if err != nil {
 				return "", err
 			}
 			parts = append(parts, r)
 			for _, a := range rest {
-				s, err := repr(a)
+				s, err := Repr(a)
 				if err != nil {
 					return "", err
 				}
 				parts = append(parts, s)
 			}
 			for _, k := range kws {
-				s, err := repr(k.Value)
+				s, err := Repr(k.Value)
 				if err != nil {
 					return "", err
 				}

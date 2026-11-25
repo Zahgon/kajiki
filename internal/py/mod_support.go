@@ -128,10 +128,10 @@ func (ms *methods) add(name string, v Value) {
 	ms.values = append(ms.values, v)
 }
 
-// wrap adds f wrapped by the builtin descriptor class named desc
-// (classmethod or property).
-func (ms *methods) wrap(desc, name string, f fn) {
-	d, err := Call(Builtin(desc), []Value{Func(name, f)}, nil)
+// wrap adds the functions fs wrapped by the builtin descriptor class named
+// desc: classmethod(f), property(f) or property(fget, fset).
+func (ms *methods) wrap(desc, name string, fs ...Value) {
+	d, err := Call(Builtin(desc), fs, nil)
 	if err != nil {
 		if ms.err == nil {
 			ms.err = err
@@ -141,12 +141,17 @@ func (ms *methods) wrap(desc, name string, f fn) {
 	ms.add(name, d)
 }
 
+// getset adds a property of two Go functions, the getter and the setter.
+func (ms *methods) getset(name string, get, set fn) {
+	ms.wrap("property", name, Func("fget", get), Func("fset", set))
+}
+
 // classmethod adds a class method; it receives the class as args[0].
-func (ms *methods) classmethod(name string, f fn) { ms.wrap("classmethod", name, f) }
+func (ms *methods) classmethod(name string, f fn) { ms.wrap("classmethod", name, Func(name, f)) }
 
 // property adds a read-only property computed by get from the instance.
 func (ms *methods) property(name string, get func(self Value) (Value, error)) {
-	ms.wrap("property", name, func(args []Value, _ []Keyword) (Value, error) { return get(args[0]) })
+	ms.wrap("property", name, Func(name, func(args []Value, _ []Keyword) (Value, error) { return get(args[0]) }))
 }
 
 // instance makes an instance of cls (a class of this package deriving from
@@ -181,46 +186,8 @@ func kwarg(kwargs []Keyword, name string) Value {
 	return nil
 }
 
-// callMethodKw is v.name(*args, **kwargs).
-func callMethodKw(v Value, name string, args []Value, kwargs []Keyword) (Value, error) {
-	m, err := GetAttr(v, name)
-	if err != nil {
-		return nil, err
-	}
-	return Call(m, args, kwargs)
-}
-
-// truth is bool(v).
-func truth(v Value) (bool, error) { return Truth(v) }
-
-// call is v(*args).
+// call is f(*args), Call with the arguments listed and no keywords.
 func call(f Value, args ...Value) (Value, error) { return Call(f, args, nil) }
-
-// repr is repr(v).
-func repr(v Value) (string, error) { return Repr(v) }
-
-// iterate calls f with each item of the iterable v.
-func iterate(v Value, f func(item Value) error) error {
-	it, err := Iter(v)
-	if err != nil {
-		return err
-	}
-	for {
-		item, ok, err := it.Next()
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-		if err := f(item); err != nil {
-			return err
-		}
-	}
-}
-
-// listOf is list(v).
-func listOf(v Value) ([]Value, error) { return ToList(v) }
 
 // goIter is the state of an iterator object written in Go: next returns the
 // next item, ok false at the end, after which the iterator stays exhausted;

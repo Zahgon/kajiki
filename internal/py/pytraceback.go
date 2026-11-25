@@ -3,9 +3,15 @@
 // SPDX-License-Identifier: PSF-2.0
 //
 // Traceback objects (an exception's __traceback__) and the frame objects they
-// and generators show.
+// and generators show, and the report of an exception nothing can catch.
 
 package py
+
+import (
+	"io"
+	"strconv"
+	"strings"
+)
 
 // tracebackV is a traceback object: one entry of an exception's traceback,
 // tb_next leading to the entry of the frame it called, towards the one that
@@ -164,4 +170,57 @@ func (o *frameObjV) getAttr(name string) (Value, error) {
 		return none, nil
 	}
 	return nil, nil
+}
+
+// exceptionLine is the last line of the report of an exception: its class
+// (qualified by the module unless builtins or __main__) and str(), or
+// "<exception str() failed>".
+func exceptionLine(exc Value) string {
+	k := classOf(exc)
+	name := k.name
+	if mod := k.moduleName(); mod != "builtins" && mod != "__main__" && mod != "" {
+		name = mod + "." + k.qualName()
+	}
+	text, err := pyStr(exc)
+	if err != nil {
+		text = "<exception str() failed>"
+	}
+	if text == "" {
+		return name
+	}
+	return name + ": " + text
+}
+
+// writeUnraisable is PyErr_WriteUnraisable as the default
+// sys.unraisablehook reports it on stderr: an exception raised where nothing
+// can catch it, such as in finalizing the generator obj. The hook gives up
+// silently when the report cannot be written, and so does this.
+func writeUnraisable(obj Value, err error) {
+	x := asExc(err)
+	what, rerr := pyRepr(obj)
+	if rerr != nil {
+		what = "<object repr() failed>"
+	}
+	var b strings.Builder
+	b.WriteString("Exception ignored in: " + what + "\n")
+	if len(x.tb) > 0 {
+		b.WriteString("Traceback (most recent call last):\n")
+		for i := len(x.tb) - 1; i >= 0; i-- {
+			e := x.tb[i]
+			line := -1
+			if l, ok := e.co.line(e.line); ok {
+				line = l
+			}
+			b.WriteString("  File \"" + e.co.filename + "\", line " + strconv.Itoa(line) + ", in " + e.co.name + "\n")
+			if src, ok := fileLine(e.co.filename, line); ok {
+				if src = strings.TrimSpace(src); src != "" {
+					b.WriteString("    " + src + "\n")
+				}
+			}
+		}
+	}
+	b.WriteString(exceptionLine(x) + "\n")
+	if _, err := io.WriteString(interp.stderr, b.String()); err != nil {
+		return
+	}
 }

@@ -253,9 +253,12 @@ func templateMethods() *methods {
 			kwDict := StrDict(kws, kwVals)
 			lookup := func(n string) (Value, error) {
 				if len(args) == 2 {
+					// ChainMap(kws, mapping)[n]: a KeyError from kws goes on
+					// to mapping.
 					if len(kwargs) > 0 {
-						if v, err := GetItem(kwDict, String(n)); err == nil {
-							return v, nil
+						v, err := GetItem(kwDict, String(n))
+						if err == nil || !ErrorIs(err, "KeyError") {
+							return v, err
 						}
 					}
 					return GetItem(args[1], String(n))

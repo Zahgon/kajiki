@@ -282,10 +282,11 @@ func ownClassAttr(k *classV, name string) (Value, bool) {
 	if sample == nil {
 		return nil, false
 	}
-	if _, ok := attrOf(sample, name); !ok {
+	a, ok := attrOf(sample, name)
+	if !ok {
 		return nil, false
 	}
-	if _, isCall := mustAttr(sample, name).(*callable); !isCall {
+	if _, isCall := a.(*callable); !isCall {
 		return &dataDescV{name: name, owner: k.name}, true
 	}
 	typ := "method_descriptor"
@@ -350,11 +351,6 @@ func dictFromkeysOf(c *callCtx, cls *classV, args []Value, kw *dictV) (Value, er
 		}
 	}
 	return d, nil
-}
-
-func mustAttr(v Value, name string) Value {
-	a, _ := attrOf(v, name)
-	return a
 }
 
 // dataDescV is a data attribute of a builtin class, as the class holds it:

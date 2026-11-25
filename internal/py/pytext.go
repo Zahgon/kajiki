@@ -77,35 +77,10 @@ func appendRunes(b []byte, rs []rune) []byte {
 	return b
 }
 
-// appendLowerAt appends the lower mapping of rs[i], lowering U+03A3 to the
-// final sigma U+03C2 in the Final_Sigma context as CPython's lower_ucs4 does.
-func appendLowerAt(b []byte, rs []rune, i int) []byte {
-	switch {
-	case rs[i] != 'Σ':
-		return appendLower(b, rs[i])
-	case isFinalSigma(rs, i):
-		return appendRune(b, 'ς')
-	default:
-		return appendRune(b, 'σ')
-	}
-}
-
-// isFinalSigma reports whether rs[i] is in the Final_Sigma context: cased
-// case-ignorable* Σ, not followed by case-ignorable* cased.
-func isFinalSigma(rs []rune, i int) bool {
-	j := i - 1
-	for j >= 0 && pyuni.IsCaseIgnorable(rs[j]) {
-		j--
-	}
-	if j < 0 || !pyuni.IsCased(rs[j]) {
-		return false
-	}
-	j = i + 1
-	for j < len(rs) && pyuni.IsCaseIgnorable(rs[j]) {
-		j++
-	}
-	return j == len(rs) || !pyuni.IsCased(rs[j])
-}
+// appendLowerAt appends the lower mapping of rs[i] in its context: U+03A3
+// lowers to the final sigma U+03C2 in the Final_Sigma context, as CPython's
+// lower_ucs4 does.
+func appendLowerAt(b []byte, rs []rune, i int) []byte { return appendRunes(b, pyuni.LowerAt(rs, i)) }
 
 // strLower is str.lower(): the full lowercase mapping, so 'İ' becomes "i̇", with
 // Σ lowered to ς at the end of a word.
@@ -201,89 +176,17 @@ func runesStr(rs []rune) string {
 	return string(b)
 }
 
-// strRepr is repr(s) for a str.
-func strRepr(s string) string {
-	quote := reprQuote(s)
-	b := []byte{quote}
-	for len(s) > 0 {
-		r, n := decodeRune(s)
-		s = s[n:]
-		switch {
-		case isReprSpecial(r, quote):
-			b = appendReprSpecial(b, r)
-		case r >= 0x20 && r < 0x7F:
-			b = append(b, byte(r))
-		case r > 0x7F && pyuni.IsPrintable(r):
-			b = appendRune(b, r)
-		default:
-			b = appendBackslashEscape(b, r)
-		}
-	}
-	return string(append(b, quote))
-}
+// strRepr is repr(s) for a str (lone surrogates included).
+func strRepr(s string) string { return pyuni.Repr(strRunes(s)) }
 
 // bytesRepr is repr(b) for a bytes object holding the bytes of s.
 func bytesRepr(s string) string {
-	quote := reprQuote(s)
+	quote := pyuni.ReprQuote(s)
 	b := []byte{'b', quote}
 	for i := 0; i < len(s); i++ {
-		c := rune(s[i])
-		switch {
-		case isReprSpecial(c, quote):
-			b = appendReprSpecial(b, c)
-		case c >= 0x20 && c < 0x7F:
-			b = append(b, byte(c))
-		default:
-			b = appendBackslashEscape(b, c)
-		}
+		b = pyuni.AppendRepr(b, rune(s[i]), quote, true)
 	}
 	return string(append(b, quote))
-}
-
-// reprQuote is the quote repr() puts around s: a double quote when s holds a
-// single quote and no double quote, else a single quote.
-func reprQuote(s string) byte {
-	if strings.IndexByte(s, '\'') >= 0 && strings.IndexByte(s, '"') < 0 {
-		return '"'
-	}
-	return '\''
-}
-
-// isReprSpecial reports whether repr() writes r as a backslash and a letter
-// (or the character itself) inside the given quotes.
-func isReprSpecial(r rune, quote byte) bool {
-	return r == rune(quote) || r == '\\' || r == '\t' || r == '\n' || r == '\r'
-}
-
-func appendReprSpecial(b []byte, r rune) []byte {
-	switch r {
-	case '\t':
-		return append(b, '\\', 't')
-	case '\n':
-		return append(b, '\\', 'n')
-	case '\r':
-		return append(b, '\\', 'r')
-	}
-	return append(b, '\\', byte(r))
-}
-
-// appendBackslashEscape appends the backslash escape of r that repr(),
-// ascii() and the backslashreplace error handler write: \xhh up to U+00FF,
-// \uhhhh up to U+FFFF and \Uhhhhhhhh above, in lowercase hex.
-func appendBackslashEscape(b []byte, r rune) []byte {
-	letter, width := byte('x'), 2
-	switch {
-	case r > 0xFFFF:
-		letter, width = 'U', 8
-	case r > 0xFF:
-		letter, width = 'u', 4
-	}
-	h := strconv.FormatInt(int64(r), 16)
-	b = append(b, '\\', letter)
-	for i := len(h); i < width; i++ {
-		b = append(b, '0')
-	}
-	return append(b, h...)
 }
 
 // floatRepr is repr() of a float: the shortest digits that round-trip, in
@@ -337,37 +240,6 @@ func floatRepr(f float64) string {
 		expDigits = "0" + expDigits
 	}
 	return sign + out + "e" + expSign + expDigits
-}
-
-// splitLines is str.splitlines(keepends): it breaks at every character
-// pyuni.IsLineBreak accepts, reading "\r\n" as one break, and yields no empty last
-// line for a trailing break.
-func splitLines(s string, keepends bool) []string {
-	out := []string{}
-	for i, j := 0, 0; i < len(s); j = i {
-		var r rune
-		n := 0
-		for i < len(s) {
-			r, n = utf8.DecodeRuneInString(s[i:])
-			if pyuni.IsLineBreak(r) {
-				break
-			}
-			i += n
-		}
-		eol := i
-		if i < len(s) {
-			if r == '\r' && i+1 < len(s) && s[i+1] == '\n' {
-				i += 2
-			} else {
-				i += n
-			}
-			if keepends {
-				eol = i
-			}
-		}
-		out = append(out, s[j:eol])
-	}
-	return out
 }
 
 // skipSpace returns the offset of the first character at or after i whose

@@ -11,7 +11,9 @@ package py
 
 import (
 	"iter"
+	"runtime"
 	"strings"
+	"sync"
 )
 
 // scopeKind is the kind of block a scope is.
@@ -808,6 +810,7 @@ func (f *frame) execNode(n *Node) (ctlFlow, error) {
 }
 
 func (f *frame) execFor(n *Node) (ctlFlow, error) {
+	cur, made := interp.cur, interp.generators
 	seq, err := f.evalIterable(n.B)
 	if err != nil {
 		return ctlNone, err
@@ -816,18 +819,29 @@ func (f *frame) execFor(n *Node) (ctlFlow, error) {
 	if err != nil {
 		return ctlNone, err
 	}
-	// A generator made by the loop's own iterable expression is referenced
-	// by the loop alone: leaving the loop early drops it, and CPython's
-	// reference counting closes it there.
+	// A generator that the loop's iterable expression itself made in this
+	// frame, by calling a generator function or as a generator expression,
+	// is referenced by the loop alone: leaving the loop early drops it, and
+	// CPython's reference counting closes it there. A loop in a body being
+	// released ends it the same way, without running its Python code.
 	var temp *genV
-	if g, ok := seq.(*genV); ok && !g.started && (n.B.Kind == "Call" || n.B.Kind == "GeneratorExp") {
+	if g, ok := seq.(*genV); ok && !g.started && g.creator == cur && g.serial > made &&
+		(n.B.Kind == "Call" || n.B.Kind == "GeneratorExp") {
 		temp = g
 	}
 	early := func(c ctlFlow, err error) (ctlFlow, error) {
-		if temp != nil && !temp.done {
-			if cerr := temp.close(); cerr != nil && err == nil {
-				return ctlNone, cerr
-			}
+		if temp == nil || temp.done {
+			return c, err
+		}
+		if err == errGenStopped {
+			temp.done = true
+			temp.body.release()
+			return c, err
+		}
+		// What closing it raises goes where the finalizer's exceptions
+		// go in CPython: reported on stderr, not raised.
+		if cerr := temp.close(); cerr != nil {
+			writeUnraisable(temp, cerr)
 		}
 		return c, err
 	}
@@ -860,6 +874,9 @@ func (f *frame) execFor(n *Node) (ctlFlow, error) {
 func (f *frame) execTry(n *Node) (ctlFlow, error) {
 	run := func() (ctlFlow, error) {
 		c, err := f.execBlock(n.Body)
+		if err == errGenStopped {
+			return ctlNone, err
+		}
 		if err != nil {
 			x := asExc(err)
 			for _, h := range n.L1 {
@@ -894,12 +911,12 @@ func (f *frame) execTry(n *Node) (ctlFlow, error) {
 // ended with c and err: an exception passing through is being handled
 // while it runs, and a return, break or continue there replaces it.
 func (f *frame) runFinally(n *Node, c ctlFlow, err error) (ctlFlow, error) {
-	if len(n.Finalbody) == 0 {
+	if len(n.Finalbody) == 0 || err == errGenStopped {
 		return c, err
 	}
 	saved := f.ret
 	var x *excV
-	if err != nil && err != errGenStopped {
+	if err != nil {
 		x = asExc(err)
 		defer pushHandled(x)()
 	}
@@ -1073,28 +1090,10 @@ func (f *frame) unpack(targets []*Node, v Value) error {
 			star = i
 		}
 	}
-	it, err := pyIterForUnpack(v)
-	if err != nil {
-		return err
-	}
 	if star < 0 {
-		vals := make([]Value, 0, len(targets))
-		for range targets {
-			x, ok, err := it.next()
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return valueErr("not enough values to unpack (expected %d, got %d)", len(targets), len(vals))
-			}
-			vals = append(vals, x)
-		}
-		_, more, err := it.next()
+		vals, err := unpackValues(v, len(targets))
 		if err != nil {
 			return err
-		}
-		if more {
-			return valueErr("too many values to unpack (expected %d)", len(targets))
 		}
 		for i, t := range targets {
 			if err := f.assign(t, vals[i]); err != nil {
@@ -1102,6 +1101,10 @@ func (f *frame) unpack(targets []*Node, v Value) error {
 			}
 		}
 		return nil
+	}
+	it, err := pyIterForUnpack(v)
+	if err != nil {
+		return err
 	}
 	var vals []Value
 	for {
@@ -1133,6 +1136,34 @@ func (f *frame) unpack(targets []*Node, v Value) error {
 		}
 	}
 	return nil
+}
+
+// unpackValues is the n values of `t1, ..., tn = v`, with the errors of
+// unpacking.
+func unpackValues(v Value, n int) ([]Value, error) {
+	it, err := pyIterForUnpack(v)
+	if err != nil {
+		return nil, err
+	}
+	vals := make([]Value, 0, n)
+	for len(vals) < n {
+		x, ok, err := it.next()
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, valueErr("not enough values to unpack (expected %d, got %d)", n, len(vals))
+		}
+		vals = append(vals, x)
+	}
+	_, more, err := it.next()
+	if err != nil {
+		return nil, err
+	}
+	if more {
+		return nil, valueErr("too many values to unpack (expected %d)", n)
+	}
+	return vals, nil
 }
 
 func pyIterForUnpack(v Value) (iterator, error) {
@@ -1784,7 +1815,9 @@ outer:
 }
 
 // genState is the link between a running generator body and its
-// generator object.
+// generator object. Neither it nor the body's frame refers to the generator
+// object, so that a generator nobody refers to any more can be collected
+// while its body is paused.
 type genState struct {
 	yield func(Value, error) bool
 	// sent is the value send() passes to the paused yield expression;
@@ -1793,25 +1826,86 @@ type genState struct {
 	thrown error
 	// delegate is the iterator a yield from in the body is delegating to.
 	delegate Value
+	// handled holds the exceptions the paused body is handling: the
+	// generator's own exception state, which sys.exception() shows on top
+	// of its caller's while the body runs.
+	handled []*excV
+	// retval is the value the body returned, for StopIteration.
+	retval Value
 }
 
-// errGenStopped ends a generator body whose generator was dropped.
+// errGenStopped ends a paused generator body that will never be resumed:
+// the body unwinds without running any more Python code (no except
+// handler, finally block or __exit__).
 var errGenStopped = &excV{Class: "GeneratorExit"}
+
+// genBody is what ends a generator body: stop (from iter.Pull2) unwinds a
+// paused body with errGenStopped, run with the body's own exception state
+// and frame.
+type genBody struct {
+	stop  func()
+	st    *genState
+	frame *frame
+}
+
+// release ends the body: at once if it never started or has finished,
+// else by unwinding it from its paused yield without running Python code.
+// The interpreter's exception state and current frame are those of the
+// body while it unwinds, and are restored afterwards.
+func (b *genBody) release() {
+	outer := interp.handled
+	interp.handled = append([]*excV(nil), b.st.handled...)
+	b.st.handled = nil
+	leave := b.frame.enter()
+	b.stop()
+	leave()
+	b.frame.back = nil
+	interp.handled = outer
+}
+
+// dropped holds the bodies of the generators collected while paused,
+// which releaseDropped ends on the interpreter's goroutine.
+var dropped struct {
+	sync.Mutex
+	bodies []*genBody
+}
+
+// dropBody queues the body of a collected generator object; it runs on the
+// goroutine of the runtime's cleanups, so it only queues.
+func dropBody(b *genBody) {
+	dropped.Lock()
+	dropped.bodies = append(dropped.bodies, b)
+	dropped.Unlock()
+}
+
+// releaseDropped ends the bodies of the generators collected since the
+// last call.
+func releaseDropped() {
+	dropped.Lock()
+	bodies := dropped.bodies
+	dropped.bodies = nil
+	dropped.Unlock()
+	for _, b := range bodies {
+		b.release()
+	}
+}
 
 // genV is a generator object, made by a generator expression or by calling a
 // generator function.
 type genV struct {
 	qual    string
 	next    func() (Value, error, bool)
-	stop    func()
+	body    *genBody
 	state   *genState
 	started bool
 	running bool
 	done    bool
-	// retval is the value the body returned, for StopIteration.
-	retval Value
 	// frame is the frame the body runs in.
 	frame *frame
+	// creator is the frame that was running when the generator was made,
+	// serial the number of generators made before it.
+	creator *frame
+	serial  uint64
 	// kind is the type name: generator, coroutine or async_generator.
 	kind string
 	// awaited is set once a coroutine has been awaited.
@@ -1828,10 +1922,11 @@ func (g *genV) repr(*reprState) (string, error) {
 // paused yield expression (or thrown raised there). more is false when the
 // body finished.
 func (g *genV) resume(sent Value, thrown error) (Value, bool, error) {
+	st := g.state
 	if g.done {
 		// Only the call that finished the body reports its return value;
 		// an exhausted generator raises a bare StopIteration.
-		g.retval = nil
+		st.retval = nil
 		if thrown != nil {
 			return nil, false, thrown
 		}
@@ -1842,30 +1937,38 @@ func (g *genV) resume(sent Value, thrown error) (Value, bool, error) {
 	}
 	if !g.started && thrown != nil {
 		g.done = true
-		g.stop()
+		g.body.release()
 		return nil, false, thrown
 	}
 	g.started = true
-	if g.state != nil {
-		g.state.sent, g.state.thrown = sent, thrown
-	}
+	st.sent, st.thrown = sent, thrown
 	// A generator's frame counts towards the recursion limit while it
-	// runs.
+	// runs; at the limit the frame is left without running its handlers,
+	// and the generator is finished.
 	if interp.depth >= interp.recursionLimit {
 		g.done = true
-		g.stop()
+		g.body.release()
 		return nil, false, newPyErr("RecursionError", "maximum recursion depth exceeded")
 	}
 	interp.depth++
 	g.running = true
+	// The body runs with its own exception state on top of the caller's,
+	// and keeps what it is still handling when it yields.
+	outer := interp.handled
+	interp.handled = append(outer[:len(outer):len(outer)], st.handled...)
 	leave := g.frame.enter()
 	v, err, ok := g.next()
 	leave()
+	// A paused generator's frame has no f_back, and does not keep its
+	// last caller alive.
+	g.frame.back = nil
+	st.handled = append([]*excV(nil), interp.handled[len(outer):]...)
+	interp.handled = outer
 	g.running = false
 	interp.depth--
 	if !ok || err != nil {
 		g.done = true
-		g.stop()
+		g.body.release()
 		if err != nil {
 			return nil, false, err
 		}
@@ -1885,7 +1988,7 @@ func (g *genV) iter() (iterator, error) {
 func (g *genV) close() error {
 	if !g.started || g.done {
 		g.done = true
-		g.stop()
+		g.body.release()
 		return nil
 	}
 	_, more, err := g.resume(none, newExc("GeneratorExit", nil))
@@ -1903,8 +2006,8 @@ func (g *genV) close() error {
 
 // stopIteration is the StopIteration a finished generator raises.
 func (g *genV) stopIteration() error {
-	if g.retval != nil {
-		return newExc("StopIteration", []Value{g.retval})
+	if r := g.state.retval; r != nil {
+		return newExc("StopIteration", []Value{r})
 	}
 	return newExc("StopIteration", nil)
 }
@@ -2047,9 +2150,9 @@ func startGenerator(qual string, f *frame, body func() (Value, error)) *genV {
 // startGeneratorKind is startGenerator for a generator, a coroutine or an
 // asynchronous generator (kind).
 func startGeneratorKind(kind, qual string, f *frame, body func() (Value, error)) *genV {
+	releaseDropped()
 	st := &genState{sent: none}
 	f.gen = st
-	g := &genV{kind: kind, qual: qual, state: st, frame: f}
 	seq := iter.Seq2[Value, error](func(yield func(Value, error) bool) {
 		st.yield = yield
 		v, err := body()
@@ -2067,10 +2170,19 @@ func startGeneratorKind(kind, qual string, f *frame, body func() (Value, error))
 			return
 		}
 		if v != nil && !isNoneV(v) {
-			g.retval = v
+			st.retval = v
 		}
 	})
-	g.next, g.stop = iter.Pull2(seq)
+	next, stop := iter.Pull2(seq)
+	interp.generators++
+	g := &genV{kind: kind, qual: qual, state: st, frame: f, creator: interp.cur, serial: interp.generators,
+		next: next, body: &genBody{stop: stop, st: st, frame: f}}
+	// A generator object collected while its body is paused gets that body
+	// ended, by releaseDropped on the interpreter's goroutine, without
+	// running any of its Python code: CPython would run the finally blocks
+	// when the last reference went, which this runtime cannot tell, so they
+	// do not run at all rather than at some other point.
+	runtime.AddCleanup(g, dropBody, g.body)
 	return g
 }
 
@@ -2192,8 +2304,8 @@ func (f *frame) delegate(src Value) (Value, error) {
 				return nil, err
 			}
 			if !more {
-				if g.retval != nil {
-					return g.retval, nil
+				if r := g.state.retval; r != nil {
+					return r, nil
 				}
 				return none, nil
 			}
@@ -2203,9 +2315,14 @@ func (f *frame) delegate(src Value) (Value, error) {
 				sent = r
 				continue
 			}
+			// A delegating body that is being released leaves the inner
+			// generator as it is: it is a generator object of its own.
+			if yerr == errGenStopped {
+				return nil, yerr
+			}
 			// close() of the delegating generator closes the inner one;
 			// throw() passes the exception on to it.
-			if yerr == errGenStopped || isExc(yerr, "GeneratorExit") {
+			if isExc(yerr, "GeneratorExit") {
 				if cerr := g.close(); cerr != nil {
 					return nil, cerr
 				}

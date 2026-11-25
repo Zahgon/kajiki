@@ -222,6 +222,14 @@ func ClassName(cls Value) string {
 	return ""
 }
 
+// TypeCheck is PyObject_TypeCheck: whether the class of v is cls or a
+// subclass of it, without __instancecheck__ or a __class__ attribute
+// taking part.
+func TypeCheck(v, cls Value) bool {
+	k, ok := cls.(*classV)
+	return ok && classOf(v).subclassOf(k)
+}
+
 // IsInstance is isinstance(v, cls), cls a class or a tuple of classes.
 func IsInstance(v, cls Value) (bool, error) {
 	r, err := callValue(nil, pyBuiltinName("isinstance"), []Value{v, cls}, nil)
@@ -309,7 +317,7 @@ func ImportModule(name, pkg string) (Value, error) {
 	if strings.HasPrefix(name, ".") {
 		if pkg == "" {
 			return nil, toError(typeErr("the 'package' argument is required to perform a relative import for %s",
-				reprStr(name)))
+				strRepr(name)))
 		}
 		for level < len(name) && name[level] == '.' {
 			level++
@@ -331,11 +339,6 @@ func ImportModule(name, pkg string) (Value, error) {
 	}
 	m, err := importModule(name)
 	return m, toError(err)
-}
-
-func reprStr(s string) string {
-	r, _ := pyRepr(strV(s))
-	return r
 }
 
 // ---------------------------------------------------------------- exceptions

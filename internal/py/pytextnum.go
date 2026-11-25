@@ -221,17 +221,16 @@ func parseFloatText(s string) (float64, bool) {
 // _Py_string_to_number_with_underscores: underscores are allowed only
 // between two digits, and are removed. ok is false when one is elsewhere.
 func stripNumberUnderscores(b []byte) ([]byte, bool) {
-	isDigit := func(c byte) bool { return isASCIIDigit(rune(c)) }
 	var prev byte
 	clean := make([]byte, 0, len(b))
 	for _, c := range b {
 		if c == '_' {
-			if !isDigit(prev) {
+			if !isASCIIDigit(rune(prev)) {
 				return nil, false
 			}
 		} else {
 			clean = append(clean, c)
-			if prev == '_' && !isDigit(c) {
+			if prev == '_' && !isASCIIDigit(rune(c)) {
 				return nil, false
 			}
 		}

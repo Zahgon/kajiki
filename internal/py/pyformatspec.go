@@ -605,7 +605,13 @@ func fmtDigitsE(x float64, n int) (string, int) {
 	s := strconv.FormatFloat(x, 'e', max(n-1, -1), 64)
 	e := strings.IndexByte(s, 'e')
 	// FormatFloat writes the exponent as a sign and decimal digits.
-	exp, _ := strconv.Atoi(s[e+1:])
+	exp := 0
+	for _, c := range s[e+2:] {
+		exp = exp*10 + int(c-'0')
+	}
+	if s[e+1] == '-' {
+		exp = -exp
+	}
 	return strings.TrimRight(strings.Replace(s[:e], ".", "", 1), "0"), exp + 1
 }
 

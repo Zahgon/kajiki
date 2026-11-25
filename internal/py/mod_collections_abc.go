@@ -4,7 +4,7 @@
 
 package py
 
-import ()
+import "strings"
 
 // abcImpl is the _abc_impl of a class made by ABCMeta: the classes
 // registered as its virtual subclasses and its subclasses made by ABCMeta.
@@ -35,14 +35,40 @@ func init() {
 	register("collections.abc", defineCollectionsABC)
 }
 
-// implOf is the _abc_impl of a class made by ABCMeta.
-func implOf(cls Value) (*abcImpl, bool) {
+// implOf is _get_impl of the _abc module: the _abc_impl of a class made by
+// ABCMeta, the TypeError of _abc when it is anything else.
+func implOf(cls Value) (*abcImpl, error) {
 	v, err := GetAttr(cls, "_abc_impl")
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	impl, ok := Native(v).(*abcImpl)
-	return impl, ok
+	if !ok {
+		return nil, raise("TypeError", "_abc_impl is set to a wrong type")
+	}
+	return impl, nil
+}
+
+// ownImpl is the _abc_impl a class made by ABCMeta holds in its own
+// namespace, nil for any other class.
+func ownImpl(cls Value) *abcImpl {
+	v, ok := OwnAttr(cls, "_abc_impl")
+	if !ok || v == nil {
+		return nil
+	}
+	impl, isImpl := Native(v).(*abcImpl)
+	if !isImpl {
+		return nil
+	}
+	return impl
+}
+
+// isSubtype is PyType_IsSubtype(sub, cls): whether cls is in the method
+// resolution order of the class sub.
+func isSubtype(sub, cls Value) bool {
+	s, ok := sub.(*classV)
+	c, isClassV := cls.(*classV)
+	return ok && isClassV && s.subclassOf(c)
 }
 
 func abcMetaMethods(dataCls Value) *methods {
@@ -65,7 +91,7 @@ func abcMetaMethods(dataCls Value) *methods {
 		}
 		bases, _ := SeqItems(args[2])
 		for _, base := range bases {
-			if impl, ok := implOf(base); ok {
+			if impl := ownImpl(base); impl != nil {
 				impl.subclasses = append(impl.subclasses, cls)
 			}
 		}
@@ -79,18 +105,19 @@ func abcMetaMethods(dataCls Value) *methods {
 		if !isClass(sub) {
 			return nil, raise("TypeError", "Can only register classes")
 		}
-		if already, err := abcSubclassCheck(cls, sub); err != nil || already {
+		if already, err := IsSubclass(sub, cls); err != nil || already {
 			return sub, err
 		}
-		if loop, err := abcSubclassCheck(sub, cls); err != nil {
+		if loop, err := IsSubclass(cls, sub); err != nil {
 			return nil, err
 		} else if loop {
 			return nil, raise("RuntimeError", "Refusing to create an inheritance cycle")
 		}
-		impl, ok := implOf(cls)
-		if ok {
-			impl.registry = append(impl.registry, sub)
+		impl, err := implOf(cls)
+		if err != nil {
+			return nil, err
 		}
+		impl.registry = append(impl.registry, sub)
 		return sub, nil
 	})
 	ms.method("__instancecheck__", func(args []Value, kwargs []Keyword) (Value, error) {
@@ -111,26 +138,23 @@ func abcMetaMethods(dataCls Value) *methods {
 // __subclasshook__, then real inheritance, then the registered classes and
 // the subclasses made by ABCMeta, recursively.
 func abcSubclassCheck(cls, sub Value) (bool, error) {
-	if hook, err := GetAttr(cls, "__subclasshook__"); err == nil {
-		r, err := call(hook, sub)
-		if err != nil {
-			return false, err
-		}
-		if !IsNotImplemented(r) {
-			return truth(r)
-		}
+	impl, err := implOf(cls)
+	if err != nil {
+		return false, err
 	}
-	if mro, err := GetAttr(sub, "__mro__"); err == nil {
-		items, _ := SeqItems(mro)
-		for _, k := range items {
-			if Is(k, cls) {
-				return true, nil
-			}
-		}
+	hook, err := GetAttr(cls, "__subclasshook__")
+	if err != nil {
+		return false, err
 	}
-	impl, ok := implOf(cls)
-	if !ok {
-		return false, nil
+	r, err := call(hook, sub)
+	if err != nil {
+		return false, err
+	}
+	if !IsNotImplemented(r) {
+		return Truth(r)
+	}
+	if isSubtype(sub, cls) {
+		return true, nil
 	}
 	for _, group := range [][]Value{impl.registry, impl.subclasses} {
 		for _, r := range group {
@@ -145,28 +169,31 @@ func abcSubclassCheck(cls, sub Value) (bool, error) {
 
 // checkMethods is _check_methods(C, *methods): whether each method is
 // defined, and not None, somewhere in C's MRO.
-func checkMethods(c Value, names ...string) Value {
+func checkMethods(c Value, names ...string) (Value, error) {
 	mro, err := GetAttr(c, "__mro__")
 	if err != nil {
-		return NotImplemented()
+		return nil, err
 	}
-	classes, _ := SeqItems(mro)
+	classes, err := ToList(mro)
+	if err != nil {
+		return nil, err
+	}
 	for _, name := range names {
 		found := false
 		for _, k := range classes {
 			if v, ok := OwnAttr(k, name); ok {
 				if v != nil && IsNone(v) {
-					return NotImplemented()
+					return NotImplemented(), nil
 				}
 				found = true
 				break
 			}
 		}
 		if !found {
-			return NotImplemented()
+			return NotImplemented(), nil
 		}
 	}
-	return Bool(true)
+	return Bool(true), nil
 }
 
 // abcSpec describes one collections.abc class: its bases, the methods its
@@ -229,7 +256,7 @@ func defineCollectionsABC(b *builder) {
 				if !Is(args[0], made[name]) {
 					return NotImplemented(), nil
 				}
-				return checkMethods(args[1], hook...), nil
+				return checkMethods(args[1], hook...)
 			})
 		}
 		if spec.mixins != nil {
@@ -259,31 +286,21 @@ func defineCollectionsABC(b *builder) {
 			}
 		}
 	}
-	if coll, err := ImportModule("collections", ""); err == nil {
-		b.err = SetAttr(coll, "abc", b.mod)
+	coll, err := ImportModule("collections", "")
+	if err != nil {
+		b.err = err
+		return
 	}
+	b.err = SetAttr(coll, "abc", b.mod)
 }
 
 // builtinType is the builtin class of the given name, dict views included.
 func builtinType(name string) Value {
 	switch name {
-	case "dict_keys":
-		return TypeOf(mustCall(EmptyDict(), "keys"))
-	case "dict_values":
-		return TypeOf(mustCall(EmptyDict(), "values"))
-	case "dict_items":
-		return TypeOf(mustCall(EmptyDict(), "items"))
+	case "dict_keys", "dict_values", "dict_items":
+		return TypeOf(&dictViewV{d: newDict(), kind: strings.TrimPrefix(name, "dict_")})
 	}
 	return Builtin(name)
-}
-
-// mustCall is v.name() for the builtin methods that cannot fail.
-func mustCall(v Value, name string) Value {
-	r, err := CallMethod(v, name)
-	if err != nil {
-		return None()
-	}
-	return r
 }
 
 func iteratorMixins(ms *methods) {
@@ -319,7 +336,7 @@ func mappingMixins(ms *methods) {
 	view := func(name string) {
 		ms.method(name, func(args []Value, _ []Keyword) (Value, error) {
 			d := EmptyDict()
-			if err := iterate(args[0], func(k Value) error {
+			if err := ForEach(args[0], func(k Value) error {
 				v, err := GetItem(args[0], k)
 				if err != nil {
 					return err
@@ -335,18 +352,21 @@ func mappingMixins(ms *methods) {
 	view("items")
 	view("values")
 	ms.method("__eq__", func(args []Value, _ []Keyword) (Value, error) {
-		if !hasMappingMethods(args[1]) {
-			return NotImplemented(), nil
+		mapping, err := hasMappingMethods(args[1])
+		if err != nil || !mapping {
+			return NotImplemented(), err
 		}
-		a, err := call(Builtin("dict"), mustCall(args[0], "items"))
-		if err != nil {
-			return nil, err
+		dicts := make([]Value, 2)
+		for i, m := range args[:2] {
+			items, err := CallMethod(m, "items")
+			if err != nil {
+				return nil, err
+			}
+			if dicts[i], err = call(Builtin("dict"), items); err != nil {
+				return nil, err
+			}
 		}
-		b, err := call(Builtin("dict"), mustCall(args[1], "items"))
-		if err != nil {
-			return nil, err
-		}
-		return RichCompare("==", a, b)
+		return RichCompare("==", dicts[0], dicts[1])
 	})
 	ms.add("__reversed__", None())
 	ms.add("__hash__", None())
@@ -385,7 +405,7 @@ func mutableMappingMixins(ms *methods) {
 		return Tuple(k, v), DelItem(args[0], k)
 	})
 	ms.method("clear", func(args []Value, _ []Keyword) (Value, error) {
-		keys, err := listOf(args[0])
+		keys, err := ToList(args[0])
 		if err != nil {
 			return nil, err
 		}
@@ -400,8 +420,16 @@ func mutableMappingMixins(ms *methods) {
 		self := args[0]
 		if len(args) > 1 {
 			other := args[1]
-			if hasMappingMethods(other) {
-				keys, err := listOf(mustCall(other, "keys"))
+			mapping, err := hasMappingMethods(other)
+			if err != nil {
+				return nil, err
+			}
+			if mapping {
+				keysView, err := CallMethod(other, "keys")
+				if err != nil {
+					return nil, err
+				}
+				keys, err := ToList(keysView)
 				if err != nil {
 					return nil, err
 				}
@@ -414,8 +442,8 @@ func mutableMappingMixins(ms *methods) {
 						return nil, err
 					}
 				}
-			} else if err := iterate(other, func(p Value) error {
-				kv, err := listOf(p)
+			} else if err := ForEach(other, func(p Value) error {
+				kv, err := ToList(p)
 				if err != nil {
 					return err
 				}
@@ -551,7 +579,7 @@ func mutableSequenceMixins(ms *methods) {
 		return nil, err
 	})
 	ms.method("extend", func(args []Value, _ []Keyword) (Value, error) {
-		values, err := listOf(args[1])
+		values, err := ToList(args[1])
 		if err != nil {
 			return nil, err
 		}
@@ -627,10 +655,13 @@ func setMixins(ms *methods) {
 		return call(TypeOf(self), List(items...))
 	}
 	contains := func(c, v Value) (bool, error) { return Contains(c, v) }
-	isSet := func(v Value) bool {
-		has, _ := HasAttr(v, "__contains__")
-		hasLen, _ := HasAttr(v, "__len__")
-		return has && hasLen
+	isSet := func(v Value) (bool, error) {
+		for _, name := range []string{"__contains__", "__len__"} {
+			if has, err := HasAttr(v, name); err != nil || !has {
+				return false, err
+			}
+		}
+		return true, nil
 	}
 	subset := func(a, b Value) (bool, error) {
 		na, err := Len(a)
@@ -645,7 +676,7 @@ func setMixins(ms *methods) {
 			return false, nil
 		}
 		ok := true
-		err = iterate(a, func(v Value) error {
+		err = ForEach(a, func(v Value) error {
 			if !ok {
 				return nil
 			}
@@ -657,34 +688,44 @@ func setMixins(ms *methods) {
 	}
 	compare := func(name string, f func(a, b Value) (bool, error)) {
 		ms.method(name, func(args []Value, _ []Keyword) (Value, error) {
-			if !isSet(args[1]) {
-				return NotImplemented(), nil
+			set, err := isSet(args[1])
+			if err != nil || !set {
+				return NotImplemented(), err
 			}
 			r, err := f(args[0], args[1])
 			return Bool(r), err
 		})
 	}
-	lenOf := func(v Value) int {
-		n, _ := Len(v)
-		return n
+	// sizes compares len(a) with len(b) by cmp, then checks with the
+	// subset test sub.
+	sizes := func(a, b Value, cmp func(na, nb int) bool, sub func() (bool, error)) (bool, error) {
+		na, err := Len(a)
+		if err != nil {
+			return false, err
+		}
+		nb, err := Len(b)
+		if err != nil {
+			return false, err
+		}
+		if !cmp(na, nb) {
+			return false, nil
+		}
+		return sub()
 	}
 	compare("__le__", subset)
 	compare("__ge__", func(a, b Value) (bool, error) { return subset(b, a) })
 	compare("__lt__", func(a, b Value) (bool, error) {
-		s, err := subset(a, b)
-		return s && lenOf(a) < lenOf(b), err
+		return sizes(a, b, func(na, nb int) bool { return na < nb }, func() (bool, error) { return subset(a, b) })
 	})
 	compare("__gt__", func(a, b Value) (bool, error) {
-		s, err := subset(b, a)
-		return s && lenOf(a) > lenOf(b), err
+		return sizes(a, b, func(na, nb int) bool { return na > nb }, func() (bool, error) { return subset(b, a) })
 	})
 	compare("__eq__", func(a, b Value) (bool, error) {
-		s, err := subset(a, b)
-		return s && lenOf(a) == lenOf(b), err
+		return sizes(a, b, func(na, nb int) bool { return na == nb }, func() (bool, error) { return subset(a, b) })
 	})
 	filterItems := func(src Value, keep func(v Value) (bool, error)) ([]Value, error) {
 		var out []Value
-		err := iterate(src, func(v Value) error {
+		err := ForEach(src, func(v Value) error {
 			k, err := keep(v)
 			if k {
 				out = append(out, v)
@@ -695,8 +736,8 @@ func setMixins(ms *methods) {
 	}
 	binary := func(name string, f func(a, b Value) ([]Value, error)) {
 		ms.method(name, func(args []Value, _ []Keyword) (Value, error) {
-			if has, _ := HasAttr(args[1], "__iter__"); !has {
-				return NotImplemented(), nil
+			if has, err := HasAttr(args[1], "__iter__"); err != nil || !has {
+				return NotImplemented(), err
 			}
 			items, err := f(args[0], args[1])
 			if err != nil {
@@ -709,11 +750,11 @@ func setMixins(ms *methods) {
 		return filterItems(b, func(v Value) (bool, error) { return contains(a, v) })
 	}
 	or := func(a, b Value) ([]Value, error) {
-		x, err := listOf(a)
+		x, err := ToList(a)
 		if err != nil {
 			return nil, err
 		}
-		y, err := listOf(b)
+		y, err := ToList(b)
 		return append(x, y...), err
 	}
 	sub := func(a, b Value) ([]Value, error) {
@@ -744,7 +785,7 @@ func setMixins(ms *methods) {
 	binary("__rxor__", xor)
 	ms.method("isdisjoint", func(args []Value, _ []Keyword) (Value, error) {
 		disjoint := true
-		err := iterate(args[1], func(v Value) error {
+		err := ForEach(args[1], func(v Value) error {
 			in, err := contains(args[0], v)
 			if in {
 				disjoint = false
@@ -784,7 +825,7 @@ func mutableSetMixins(ms *methods) {
 		return v, err
 	})
 	ms.method("clear", func(args []Value, _ []Keyword) (Value, error) {
-		items, err := listOf(args[0])
+		items, err := ToList(args[0])
 		if err != nil {
 			return nil, err
 		}
@@ -797,7 +838,7 @@ func mutableSetMixins(ms *methods) {
 	})
 	inplace := func(name string, f func(self, v Value, other Value) error) {
 		ms.method(name, func(args []Value, _ []Keyword) (Value, error) {
-			items, err := listOf(args[1])
+			items, err := ToList(args[1])
 			if err != nil {
 				return nil, err
 			}
@@ -830,7 +871,7 @@ func mutableSetMixins(ms *methods) {
 		return err
 	})
 	ms.method("__iand__", func(args []Value, _ []Keyword) (Value, error) {
-		items, err := listOf(args[0])
+		items, err := ToList(args[0])
 		if err != nil {
 			return nil, err
 		}

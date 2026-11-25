@@ -419,6 +419,11 @@ func setNames(k *classV) error {
 	for i, v := range vals {
 		m, ok := userDescriptorMethod(v, "__set_name__")
 		if !ok {
+			if p, isProp := unsub(v).(*propertyV); isProp {
+				if s, ok := unsub(keys[i]).(strV); ok {
+					p.name = string(s)
+				}
+			}
 			continue
 		}
 		if _, err := callValue(nil, m, []Value{k, keys[i]}, nil); err != nil {
@@ -1264,6 +1269,9 @@ func (m *methodV) eq(other Value) (bool, error) {
 // propertyV is a property object.
 type propertyV struct {
 	fget, fset, fdel, doc Value
+	// name is the attribute name __set_name__ gave the property (its
+	// prop_name), "" before that.
+	name string
 }
 
 func (*propertyV) pyType() string { return "property" }
@@ -1295,6 +1303,16 @@ func (p *propertyV) getAttr(name string) (Value, error) {
 	switch name {
 	case "getter", "setter", "deleter":
 		return mk(name), nil
+	case "__set_name__":
+		return newBuiltin(name, func(c *callCtx, args []Value, kw *dictV) (Value, error) {
+			if err := posOnly(name, 2, 2, args, kw); err != nil {
+				return nil, err
+			}
+			if s, ok := unsub(args[1]).(strV); ok {
+				p.name = string(s)
+			}
+			return none, nil
+		}), nil
 	case "fget":
 		return opt(p.fget), nil
 	case "fset":
@@ -1885,10 +1903,12 @@ func userBinop(op string, a, b Value) (Value, bool, error) {
 		case strV, *listV, *tupleV, bytesV, *bytearrayV:
 			// The sequence's concatenation slot takes an instance of a
 			// subclass of its type on the right.
-			if r, err := builtinBinop(op, unsub(a), unsub(b)); err == nil {
-				return r, true, nil
+			r, err := builtinBinop(op, unsub(a), unsub(b))
+			if err != nil && isExc(err, "TypeError") {
+				// The message names the right operand's own class.
+				return nil, true, concatErr(unsub(a), b)
 			}
-			return nil, true, concatErr(unsub(a), b)
+			return r, true, err
 		}
 	case "Mult":
 		// The repetition of a sequence by an int, which may be an instance

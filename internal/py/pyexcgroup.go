@@ -266,6 +266,27 @@ func projectGroup(e *excV, keep map[*excV]bool) (*excV, error) {
 	return m, err
 }
 
+// exceptStarType is _PyEval_CheckExceptStarTypeValid: the type of an
+// except* clause must be an exception class or a tuple of them, none of
+// them an exception group.
+func exceptStarType(t Value) error {
+	items := []Value{t}
+	if tup, ok := unsub(t).(*tupleV); ok {
+		items = tup.items
+	}
+	for _, it := range items {
+		if k, ok := it.(*classV); !ok || !isExcClass(k) {
+			return typeErr("catching classes that do not inherit from BaseException is not allowed")
+		}
+	}
+	for _, it := range items {
+		if it.(*classV).subclassOf(classes["BaseExceptionGroup"]) {
+			return typeErr("catching ExceptionGroup with except* is not allowed. Use except instead.")
+		}
+	}
+	return nil
+}
+
 // execTryStar runs a try statement with except* clauses.
 func (f *frame) execTryStar(n *Node) (ctlFlow, error) {
 	run := func() (ctlFlow, error) {
@@ -302,12 +323,12 @@ func (f *frame) execTryStar(n *Node) (ctlFlow, error) {
 			if err != nil {
 				return ctlNone, err
 			}
-			if k, ok := t.(*classV); ok && k.subclassOf(classes["BaseExceptionGroup"]) {
-				return ctlNone, typeErr("catching ExceptionGroup with except* is not allowed. Use except instead.")
+			if err := exceptStarType(t); err != nil {
+				return ctlNone, err
 			}
 			cond, err := splitCondition(t)
 			if err != nil {
-				return ctlNone, typeErr("catching classes that do not inherit from BaseException is not allowed")
+				return ctlNone, err
 			}
 			var match, r *excV
 			if naked {

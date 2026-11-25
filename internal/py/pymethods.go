@@ -8,6 +8,7 @@
 package py
 
 import (
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 	"math"
 	"math/big"
 	"strings"
@@ -771,16 +772,8 @@ func methodsStrSplit(name string, f func(s string, sep *string, maxsplit int) ([
 		if err != nil {
 			return nil, err
 		}
-		return methodsStrList(parts), nil
+		return strList(parts), nil
 	}
-}
-
-func methodsStrList(parts []string) *listV {
-	items := make([]Value, len(parts))
-	for i, p := range parts {
-		items[i] = strV(p)
-	}
-	return newList(items)
 }
 
 func methodsStrSplitlines(_, s string, args []Value, kw *dictV) (Value, error) {
@@ -794,7 +787,7 @@ func methodsStrSplitlines(_, s string, args []Value, kw *dictV) (Value, error) {
 			return nil, err
 		}
 	}
-	return methodsStrList(splitLines(s, keepends)), nil
+	return strList(pyuni.SplitLines(s, keepends)), nil
 }
 
 // methodsStrTranslate is str.translate(table): each character is looked up

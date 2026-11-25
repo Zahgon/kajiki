@@ -383,6 +383,24 @@ func Iter(v Value) (*Iterator, error) {
 	return &Iterator{it: it}, nil
 }
 
+// ForEach is `for item in v: f(item)`: it stops at the first error, of the
+// iteration or of f.
+func ForEach(v Value, f func(item Value) error) error {
+	it, err := Iter(v)
+	if err != nil {
+		return err
+	}
+	for {
+		item, ok, err := it.Next()
+		if err != nil || !ok {
+			return err
+		}
+		if err := f(item); err != nil {
+			return err
+		}
+	}
+}
+
 // ToList is list(v).
 func ToList(v Value) ([]Value, error) {
 	items, err := toSlice(v)
@@ -406,16 +424,10 @@ func ExceptionOf(class, text string) *Error {
 	return toError(e).(*Error)
 }
 
-// HasIter is hasattr(v, '__iter__'): whether the type of v defines
-// iteration.
-func HasIter(v Value) bool {
-	switch v.(type) {
-	case *genV, *iterObj:
-		return true
-	}
-	if hasSlot(v, "__iter__") {
-		return true
-	}
-	ok, err := HasAttr(v, "__iter__")
-	return ok && err == nil
+// Unpack is the n values of `t1, ..., tn = v`, with the errors of
+// unpacking ("cannot unpack non-iterable ...", "not enough values to
+// unpack ...", "too many values to unpack ...").
+func Unpack(v Value, n int) ([]Value, error) {
+	vals, err := unpackValues(v, n)
+	return vals, toError(err)
 }

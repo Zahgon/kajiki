@@ -405,7 +405,11 @@ func roundingFunc(name, special string, f func(float64) float64) fn {
 		}
 		x := args[0]
 		if fl, ok := AsFloat(x); !ok || TypeName(x) != "float" {
-			if has, err := HasAttr(TypeOf(x), special); err == nil && has {
+			has, err := HasAttr(TypeOf(x), special)
+			if err != nil {
+				return nil, err
+			}
+			if has {
 				return CallMethod(x, special)
 			}
 		} else {
@@ -421,14 +425,11 @@ func roundingFunc(name, special string, f func(float64) float64) fn {
 
 // floatToInt is PyLong_FromDouble.
 func floatToInt(f float64) (Value, error) {
-	if math.IsInf(f, 0) {
-		return nil, raise("OverflowError", "cannot convert float infinity to integer")
+	i, err := floatToBigInt(f)
+	if err != nil {
+		return nil, err
 	}
-	if math.IsNaN(f) {
-		return nil, raise("ValueError", "cannot convert float NaN to integer")
-	}
-	i, _ := big.NewFloat(f).Int(nil)
-	return BigInt(i), nil
+	return mkBig(i), nil
 }
 
 func mathTrunc(args []Value, kwargs []Keyword) (Value, error) {
@@ -576,7 +577,7 @@ func mathFsum(args []Value, kwargs []Keyword) (Value, error) {
 	var p []float64
 	specialSum, infSum := 0.0, 0.0
 	var overflow error
-	err := iterate(args[0], func(item Value) error {
+	err := ForEach(args[0], func(item Value) error {
 		x, err := sumArg(item)
 		if err != nil {
 			return err
@@ -662,7 +663,7 @@ func mathProd(args []Value, kwargs []Keyword) (Value, error) {
 	if result == nil {
 		result = Int(1)
 	}
-	err = iterate(buf[0], func(item Value) error {
+	err = ForEach(buf[0], func(item Value) error {
 		r, err := BinaryOp("Mult", result, item)
 		result = r
 		return err
@@ -682,11 +683,11 @@ func mathSumprod(args []Value, kwargs []Keyword) (Value, error) {
 	if err := CheckPositional("sumprod", len(args), 2, 2); err != nil {
 		return nil, err
 	}
-	p, err := listOf(args[0])
+	p, err := ToList(args[0])
 	if err != nil {
 		return nil, err
 	}
-	q, err := listOf(args[1])
+	q, err := ToList(args[1])
 	if err != nil {
 		return nil, err
 	}

@@ -237,7 +237,8 @@ func Extract(source []byte, opts ExtractOptions) ([]Message, error) {
 
 // newError is the *Error for an exception: KajikiTemplateError and its
 // subclasses carry their location, any other exception is located by its
-// traceback.
+// traceback. An exception raised while reading the location attributes is
+// the error reported instead.
 func newError(err error) *Error {
 	var pe *py.Error
 	if !errors.As(err, &pe) {
@@ -245,46 +246,73 @@ func newError(err error) *Error {
 	}
 	e := &Error{Class: pe.Class, Message: pe.Text}
 	exc := pe.Value()
-	if !isInstance(exc, kajikiTemplateError) {
+	if !py.TypeCheck(exc, kajikiTemplateError) {
 		e.Filename, e.Line = templateLocation(err)
 		return e
 	}
-	if isInstance(exc, kajikiSyntaxError) {
-		if cause, err := py.GetAttr(exc, "__cause__"); err == nil {
-			e.SyntaxMsg = strAttr(cause, "msg")
+	if py.TypeCheck(exc, kajikiSyntaxError) {
+		cause, err := py.GetAttr(exc, "__cause__")
+		if err != nil {
+			return tracedError(err)
+		}
+		if e.SyntaxMsg, err = strAttr(cause, "msg"); err != nil {
+			return tracedError(err)
 		}
 	}
-	e.Filename = strAttr(exc, "filename")
-	e.Line = intAttr(exc, "linenum")
-	e.Column = intAttr(exc, "colnum")
+	var aerr error
+	if e.Filename, aerr = strAttr(exc, "filename"); aerr != nil {
+		return tracedError(aerr)
+	}
+	if e.Line, aerr = intAttr(exc, "linenum"); aerr != nil {
+		return tracedError(aerr)
+	}
+	if e.Column, aerr = intAttr(exc, "colnum"); aerr != nil {
+		return tracedError(aerr)
+	}
 	return e
 }
 
-// isInstance is isinstance(v, cls) for one of the exception classes.
-func isInstance(v, cls py.Value) bool {
-	is, err := py.IsInstance(v, cls)
-	return err == nil && is
+// tracedError is the *Error of an exception located by its traceback.
+func tracedError(err error) *Error {
+	var pe *py.Error
+	if !errors.As(err, &pe) {
+		return &Error{Class: "RuntimeError", Message: err.Error()}
+	}
+	e := &Error{Class: pe.Class, Message: pe.Text}
+	e.Filename, e.Line = templateLocation(err)
+	return e
 }
 
-// strAttr is the str attribute name of v, "" when it has none.
-func strAttr(v py.Value, name string) string {
+// optAttr is attribute name of v, nil when v has none (AttributeError).
+func optAttr(v py.Value, name string) (py.Value, error) {
 	a, err := py.GetAttr(v, name)
-	if err != nil {
-		return ""
+	if err != nil && py.ErrorIs(err, "AttributeError") {
+		return nil, nil
+	}
+	return a, err
+}
+
+// strAttr is the str attribute name of v, "" when it has none or holds
+// something else (None).
+func strAttr(v py.Value, name string) (string, error) {
+	a, err := optAttr(v, name)
+	if err != nil || a == nil {
+		return "", err
 	}
 	s, _ := py.AsString(a)
-	return s
+	return s, nil
 }
 
-// intAttr is the int attribute name of v, 0 when it has none.
-func intAttr(v py.Value, name string) int {
-	a, err := py.GetAttr(v, name)
-	if err != nil {
-		return 0
+// intAttr is the int attribute name of v, 0 when it has none or holds
+// something else (None).
+func intAttr(v py.Value, name string) (int, error) {
+	a, err := optAttr(v, name)
+	if err != nil || a == nil {
+		return 0, err
 	}
 	i, ok := py.AsInt(a)
 	if !ok {
-		return 0
+		return 0, nil
 	}
-	return int(i.Int64())
+	return int(i.Int64()), nil
 }

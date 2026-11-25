@@ -9,6 +9,7 @@
 package py
 
 import (
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 	"strings"
 )
 
@@ -137,10 +138,15 @@ func initExc(e *excV, args []Value, kw *dictV) error {
 			return err
 		}
 	}
+	// Message caches str() of the exception. Creating an exception does not
+	// call str() in Python, so a str() that would raise leaves the text
+	// excStr gives; excText raises the error when str() is asked for.
 	e.Message = excStr(base, e.args)
-	if s, err := excBuiltinStr(e); err == nil {
-		e.Message = s
+	s, err := excBuiltinStr(e)
+	if err != nil {
+		return nil
 	}
+	e.Message = s
 	return nil
 }
 
@@ -284,7 +290,7 @@ func unicodeErrorStr(e *excV, base string) (string, error) {
 	rs := strRunes(string(text))
 	if en == s+1 && s >= 0 && s < int64(len(rs)) {
 		r := rs[s]
-		esc := string(appendBackslashEscape(nil, r))
+		esc := string(pyuni.AppendEscape(nil, r))
 		return "'" + enc + "' codec can't encode character '" + esc + "' in position " + itoa(int(s)) + ": " + reason, nil
 	}
 	return "'" + enc + "' codec can't encode characters in position " + itoa(int(s)) + "-" + itoa(int(en-1)) +

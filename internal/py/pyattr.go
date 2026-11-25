@@ -21,6 +21,16 @@ func slotStore(self Value) map[string]Value {
 	return nil
 }
 
+// attrName is the name argument of getattr, setattr, delattr, hasattr and
+// the attribute slot methods: a str (or an instance of a subclass).
+func attrName(v Value) (string, error) {
+	s, ok := unsub(v).(strV)
+	if !ok {
+		return "", typeErr("attribute name must be string, not '%s'", typeName(v))
+	}
+	return string(s), nil
+}
+
 // instanceGetattr is getattr(self, name) for an instance of class k with
 // instance dictionary dict (nil without one): the class's
 // __getattribute__ (object's generic one by default), then __getattr__
@@ -138,7 +148,7 @@ func descriptorGet(attr Value, self Value, owner *classV) (Value, error) {
 			return attr, nil
 		}
 		if p.fget == nil {
-			return nil, newPyErr("AttributeError", "property '"+propertyName(p)+"' of '"+owner.name+"' object has no getter")
+			return nil, propertyError(p, owner, "getter")
 		}
 		return callValue(nil, p.fget, []Value{self}, nil)
 	}
@@ -152,20 +162,15 @@ func descriptorGet(attr Value, self Value, owner *classV) (Value, error) {
 	return bindDescriptor(attr, self, owner), nil
 }
 
-// propertyName is the name a property reports in its errors: the
-// __name__ of its getter.
-func propertyName(p *propertyV) string {
-	for _, f := range []Value{p.fget, p.fset, p.fdel} {
-		if f == nil {
-			continue
-		}
-		if n, err := getattrOpt(f, "__name__"); err == nil && n != nil {
-			if s, ok := n.(strV); ok {
-				return string(s)
-			}
-		}
+// propertyError is the AttributeError of a property used on an instance of
+// class k without the function it needs (what is getter, setter or
+// deleter): property_descr_get and property_descr_set name the property by
+// the name __set_name__ gave it, and the class by its qualified name.
+func propertyError(p *propertyV, k *classV, what string) error {
+	if p.name != "" {
+		return newPyErr("AttributeError", "property "+strRepr(p.name)+" of "+strRepr(k.qualName())+" object has no "+what)
 	}
-	return "?"
+	return newPyErr("AttributeError", "property of "+strRepr(k.qualName())+" object has no "+what)
 }
 
 // instanceSetattr is setattr(self, name, value): the class's __setattr__
@@ -184,7 +189,7 @@ func objectSetattr(self Value, k *classV, dict *dictV, name string, value Value)
 	if tattr, ok := k.lookupUser(name); ok {
 		if p, ok := unsub(tattr).(*propertyV); ok {
 			if p.fset == nil {
-				return newPyErr("AttributeError", "property '"+propertyName(p)+"' of '"+k.name+"' object has no setter")
+				return propertyError(p, k, "setter")
 			}
 			_, err := callValue(nil, p.fset, []Value{self, value}, nil)
 			return err
@@ -223,7 +228,7 @@ func objectDelattr(self Value, k *classV, dict *dictV, name string) error {
 	if tattr, ok := k.lookupUser(name); ok {
 		if p, ok := unsub(tattr).(*propertyV); ok {
 			if p.fdel == nil {
-				return newPyErr("AttributeError", "property '"+propertyName(p)+"' of '"+k.name+"' object has no deleter")
+				return propertyError(p, k, "deleter")
 			}
 			_, err := callValue(nil, p.fdel, []Value{self}, nil)
 			return err
@@ -277,9 +282,9 @@ func objectAttrSlot(name string) *callable {
 			if err := posOnly(name, want, want, args, kw); err != nil {
 				return nil, err
 			}
-			attr, ok := unsub(args[1]).(strV)
-			if !ok {
-				return nil, typeErr("attribute name must be string, not '%s'", typeName(args[1]))
+			attr, err := attrName(args[1])
+			if err != nil {
+				return nil, err
 			}
 			k, dict, builtin := selfParts(args[0])
 			switch name {

@@ -138,7 +138,7 @@ func jsonEncoderMethods() *methods {
 			}
 		}
 		if sep, ok := vals["separators"]; ok && !IsNone(sep) {
-			parts, err := listOf(sep)
+			parts, err := ToList(sep)
 			if err != nil {
 				return nil, err
 			}
@@ -197,7 +197,7 @@ func encoderOf(self Value) (*jsonEncoder, error) {
 		if err != nil {
 			return nil, err
 		}
-		if *f.dst, err = truth(v); err != nil {
+		if *f.dst, err = Truth(v); err != nil {
 			return nil, err
 		}
 	}
@@ -265,10 +265,10 @@ func (e *jsonEncoder) floatRepr(f float64, v Value) (string, error) {
 	case math.IsInf(f, -1):
 		text = "-Infinity"
 	default:
-		return repr(Float(f))
+		return Repr(Float(f))
 	}
 	if !e.allowNaN {
-		r, err := repr(v)
+		r, err := Repr(v)
 		if err != nil {
 			return "", err
 		}
@@ -320,11 +320,10 @@ func hex4(r rune) string {
 	return string([]byte{digits[r>>12&15], digits[r>>8&15], digits[r>>4&15], digits[r&15]})
 }
 
-// typeIs reports whether v is an instance of the builtin class named name
-// (a subclass included).
+// typeIs reports whether the class of v is the builtin class named name or
+// a subclass of it (PyUnicode_Check, PyLong_Check, ... of the encoder).
 func typeIs(v Value, name string) bool {
-	ok, err := IsInstance(v, Builtin(name))
-	return err == nil && ok
+	return TypeCheck(v, Builtin(name))
 }
 
 // newline writes the line break and indentation of nesting level.
@@ -401,7 +400,7 @@ func (e *jsonEncoder) leave(o Value) {
 }
 
 func (e *jsonEncoder) encodeList(out *strings.Builder, o Value, level int) error {
-	items, err := listOf(o)
+	items, err := ToList(o)
 	if err != nil {
 		return err
 	}
@@ -474,7 +473,7 @@ func (e *jsonEncoder) encodeDict(out *strings.Builder, o Value, level int) error
 			return err
 		}
 	}
-	items, err := listOf(pairs)
+	items, err := ToList(pairs)
 	if err != nil {
 		return err
 	}
@@ -546,15 +545,11 @@ func (d *jsonDecoder) fail(msg string, pos int) error {
 func jsonLoads(errCls, s Value, kwargs []Keyword) (Value, error) {
 	text, ok := AsString(s)
 	if !ok {
-		raw, isBytes := AsBytes(s)
-		if !isBytes {
-			if b, err := Call(Builtin("bytes"), []Value{s}, nil); err == nil && TypeName(s) == "bytearray" {
-				raw, isBytes = AsBytes(b)
-			}
-		}
+		b, isBytes := bytesOf(unsub(s))
 		if !isBytes {
 			return nil, raise("TypeError", "the JSON object must be str, bytes or bytearray, not %s", TypeName(s))
 		}
+		raw := []byte(b)
 		decoded, err := CallMethod(Bytes(raw), "decode", String(detectEncoding(raw)), String("surrogatepass"))
 		if err != nil {
 			return nil, err
@@ -810,11 +805,20 @@ func (d *jsonDecoder) hex4At(i int) (rune, bool) {
 	if i+4 > len(d.doc) {
 		return 0, false
 	}
-	n, err := strconv.ParseUint(string(d.doc[i:i+4]), 16, 32)
-	if err != nil || strings.ContainsAny(string(d.doc[i:i+4]), "+-xX_") {
-		return 0, false
+	var r rune
+	for _, c := range d.doc[i : i+4] {
+		switch {
+		case c >= '0' && c <= '9':
+			r = r<<4 | (c - '0')
+		case c >= 'a' && c <= 'f':
+			r = r<<4 | (c - 'a' + 10)
+		case c >= 'A' && c <= 'F':
+			r = r<<4 | (c - 'A' + 10)
+		default:
+			return 0, false
+		}
 	}
-	return rune(n), true
+	return r, true
 }
 
 // object is JSONObject: the members after the '{' at i-1.

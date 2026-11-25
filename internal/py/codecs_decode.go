@@ -141,6 +141,16 @@ func decodeASCII(b []byte, errors string) (string, error) {
 	return sb.String(), nil
 }
 
+// latin1Encode is the inverse of latin1Decode: code points 0-255 as
+// bytes.
+func latin1Encode(s string) []byte {
+	out := make([]byte, 0, len(s))
+	for _, r := range s {
+		out = append(out, byte(r))
+	}
+	return out
+}
+
 // latin1Decode is b.decode("latin-1"): each byte is the code point of the same
 // value.
 func latin1Decode(b []byte) string {

@@ -66,19 +66,19 @@ func fixedArgs(name string, n int, args []Value, kwargs []Keyword) error {
 }
 
 // isCountNumber is PyNumber_Check.
-func isCountNumber(v Value) bool {
+func isCountNumber(v Value) (bool, error) {
 	if IsNumber(v) {
-		return true
+		return true, nil
 	}
 	if _, ok := AsComplex(v); ok {
-		return true
+		return true, nil
 	}
 	for _, name := range []string{"__index__", "__int__", "__float__"} {
-		if has, err := HasAttr(TypeOf(v), name); err == nil && has {
-			return true
+		if has, err := HasAttr(TypeOf(v), name); err != nil || has {
+			return has, err
 		}
 	}
-	return false
+	return false, nil
 }
 
 func newCount(args []Value, kwargs []Keyword) (*goIter, error) {
@@ -93,8 +93,14 @@ func newCount(args []Value, kwargs []Keyword) (*goIter, error) {
 	if buf[1] != nil {
 		step = buf[1]
 	}
-	if !isCountNumber(cnt) || !isCountNumber(step) {
-		return nil, raise("TypeError", "a number is required")
+	for _, v := range []Value{cnt, step} {
+		number, err := isCountNumber(v)
+		if err != nil {
+			return nil, err
+		}
+		if !number {
+			return nil, raise("TypeError", "a number is required")
+		}
 	}
 	return &goIter{
 		next: func() (Value, bool, error) {
@@ -107,14 +113,14 @@ func newCount(args []Value, kwargs []Keyword) (*goIter, error) {
 			return v, true, nil
 		},
 		repr: func(cls string) (string, error) {
-			c, err := repr(cnt)
+			c, err := Repr(cnt)
 			if err != nil {
 				return "", err
 			}
 			if n, ok := AsInt(step); ok && n.IsInt64() && n.Int64() == 1 {
 				return cls + "(" + c + ")", nil
 			}
-			s, err := repr(step)
+			s, err := Repr(step)
 			if err != nil {
 				return "", err
 			}
@@ -179,7 +185,7 @@ func newRepeat(args []Value, kwargs []Keyword) (*goIter, error) {
 			return obj, true, nil
 		},
 		repr: func(cls string) (string, error) {
-			o, err := repr(obj)
+			o, err := Repr(obj)
 			if err != nil {
 				return "", err
 			}
@@ -297,7 +303,7 @@ func newCompress(args []Value, kwargs []Keyword) (*goIter, error) {
 			if err != nil || !ok {
 				return nil, false, err
 			}
-			t, err := truth(s)
+			t, err := Truth(s)
 			if err != nil {
 				return nil, false, err
 			}
@@ -321,13 +327,13 @@ func predicateIter(name string) func(args []Value, kwargs []Keyword) (*goIter, e
 		}
 		test := func(v Value) (bool, error) {
 			if name == "filterfalse" && IsNone(pred) {
-				return truth(v)
+				return Truth(v)
 			}
 			r, err := call(pred, v)
 			if err != nil {
 				return false, err
 			}
-			return truth(r)
+			return Truth(r)
 		}
 		dropping, stopped := true, false
 		return &goIter{next: func() (Value, bool, error) {
@@ -470,9 +476,14 @@ func newIslice(args []Value, kwargs []Keyword) (*goIter, error) {
 		return nil, err
 	}
 	stopErr := raise("ValueError", "Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.")
+	// islice_new replaces whatever PyNumber_AsSsize_t raises for an index
+	// argument with its own ValueError.
 	asSize := func(v Value) (int, bool) {
 		n, err := Ssize(v)
-		return n, err == nil
+		if err != nil {
+			return 0, false
+		}
+		return n, true
 	}
 	start, stop, step := 0, -1, 1
 	if len(args) == 2 {
@@ -558,7 +569,7 @@ func newStarmap(args []Value, kwargs []Keyword) (*goIter, error) {
 		}
 		items, isTuple := SeqItems(v)
 		if !isTuple || !IsTuple(v) {
-			if items, err = listOf(v); err != nil {
+			if items, err = ToList(v); err != nil {
 				return nil, false, err
 			}
 		}
@@ -723,7 +734,7 @@ func newProduct(args []Value, kwargs []Keyword) (*goIter, error) {
 	}
 	var pools [][]Value
 	for _, a := range args {
-		items, err := listOf(a)
+		items, err := ToList(a)
 		if err != nil {
 			return nil, err
 		}
@@ -773,7 +784,7 @@ func newPermutations(args []Value, kwargs []Keyword) (*goIter, error) {
 	if err != nil {
 		return nil, err
 	}
-	pool, err := listOf(buf[0])
+	pool, err := ToList(buf[0])
 	if err != nil {
 		return nil, err
 	}
@@ -831,7 +842,7 @@ func combinationsIter(name string, replace bool) func(args []Value, kwargs []Key
 		if err != nil {
 			return nil, err
 		}
-		pool, err := listOf(buf[0])
+		pool, err := ToList(buf[0])
 		if err != nil {
 			return nil, err
 		}

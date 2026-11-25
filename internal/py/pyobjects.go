@@ -175,11 +175,11 @@ func initExtraBuiltins() {
 			if len(args) > 3 {
 				return nil, typeErr("getattr expected at most 3 arguments, got %d", len(args))
 			}
-			name, ok := unsub(args[1]).(strV)
-			if !ok {
-				return nil, typeErr("attribute name must be string, not '%s'", typeName(args[1]))
+			name, err := attrName(args[1])
+			if err != nil {
+				return nil, err
 			}
-			v, err := pyGetattr(args[0], string(name))
+			v, err := pyGetattr(args[0], name)
 			if err != nil && len(args) == 3 && isExc(err, "AttributeError") {
 				return args[2], nil
 			}
@@ -189,12 +189,11 @@ func initExtraBuiltins() {
 			if err := posOnly("hasattr", 2, 2, args, kw); err != nil {
 				return nil, err
 			}
-			name, ok := unsub(args[1]).(strV)
-			if !ok {
-				return nil, typeErr("attribute name must be string, not '%s'", typeName(args[1]))
-			}
-			_, err := pyGetattr(args[0], string(name))
+			name, err := attrName(args[1])
 			if err != nil {
+				return nil, err
+			}
+			if _, err := pyGetattr(args[0], name); err != nil {
 				if isExc(err, "AttributeError") {
 					return falseV, nil
 				}
@@ -206,21 +205,21 @@ func initExtraBuiltins() {
 			if err := posOnly("setattr", 3, 3, args, kw); err != nil {
 				return nil, err
 			}
-			name, ok := unsub(args[1]).(strV)
-			if !ok {
-				return nil, typeErr("attribute name must be string, not '%s'", typeName(args[1]))
+			name, err := attrName(args[1])
+			if err != nil {
+				return nil, err
 			}
-			return none, pySetattr(args[0], string(name), args[2])
+			return none, pySetattr(args[0], name, args[2])
 		},
 		"delattr": func(c *callCtx, args []Value, kw *dictV) (Value, error) {
 			if err := posOnly("delattr", 2, 2, args, kw); err != nil {
 				return nil, err
 			}
-			name, ok := unsub(args[1]).(strV)
-			if !ok {
-				return nil, typeErr("attribute name must be string, not '%s'", typeName(args[1]))
+			name, err := attrName(args[1])
+			if err != nil {
+				return nil, err
 			}
-			return none, pyDelattr(args[0], string(name))
+			return none, pyDelattr(args[0], name)
 		},
 		"issubclass": func(c *callCtx, args []Value, kw *dictV) (Value, error) {
 			if err := posOnly("issubclass", 2, 2, args, kw); err != nil {

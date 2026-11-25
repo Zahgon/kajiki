@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackrosenthal/kajiki-go/internal/py"
 	"github.com/jackrosenthal/kajiki-go/internal/pyre"
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 )
 
 // The intermediate representation: a tree of nodes that iterates (as the
@@ -259,7 +260,7 @@ func newImportNode(tplName string, alias *string) *importNode {
 func (n *importNode) nodes() iter.Seq[irNode] { return self(n) }
 func (n *importNode) py() []pyItem {
 	return []pyItem{n.line(fmt.Sprintf("%s = local.__kj__.import_(%s, %s, self.__globals__)",
-		n.alias, pyre.StrRepr(n.tplName), pyre.StrRepr(n.alias)))}
+		n.alias, pyuni.ReprString(n.tplName), pyuni.ReprString(n.alias)))}
 }
 
 // includeNode is py:include: the template's body rendered in place.
@@ -271,7 +272,7 @@ type includeNode struct {
 func (n *includeNode) nodes() iter.Seq[irNode] { return self(n) }
 func (n *includeNode) py() []pyItem {
 	return []pyItem{n.line(fmt.Sprintf("yield local.__kj__.import_(%s, None, self.__globals__).__main__()",
-		pyre.StrRepr(n.tplName)))}
+		pyuni.ReprString(n.tplName)))}
 }
 
 // extendNode is py:extends: the parent template rendered with the child's
@@ -283,7 +284,7 @@ type extendNode struct {
 
 func (n *extendNode) nodes() iter.Seq[irNode] { return self(n) }
 func (n *extendNode) py() []pyItem {
-	return []pyItem{n.line(fmt.Sprintf("yield local.__kj__.extend(%s).__main__()", pyre.StrRepr(n.tplName)))}
+	return []pyItem{n.line(fmt.Sprintf("yield local.__kj__.extend(%s).__main__()", pyuni.ReprString(n.tplName)))}
 }
 
 // defNode is a template function: exposed on the template class when it is
@@ -503,7 +504,9 @@ type textNode struct {
 }
 
 func (n *textNode) nodes() iter.Seq[irNode] { return self(n) }
-func (n *textNode) py() []pyItem            { return guarded(&n.irBase, n.guard, "yield "+pyre.StrRepr(n.text)) }
+func (n *textNode) py() []pyItem {
+	return guarded(&n.irBase, n.guard, "yield "+pyuni.ReprString(n.text))
+}
 
 func guarded(b *irBase, guard, s string) []pyItem {
 	if guard != "" {
@@ -521,9 +524,9 @@ type translatableTextNode struct {
 
 func (n *translatableTextNode) nodes() iter.Seq[irNode] { return self(n) }
 func (n *translatableTextNode) py() []pyItem {
-	s := "yield " + pyre.StrRepr(n.text)
+	s := "yield " + pyuni.ReprString(n.text)
 	if !isBlank(n.text) {
-		s = "yield local.__kj__.gettext(" + pyre.StrRepr(n.text) + ")"
+		s = "yield local.__kj__.gettext(" + pyuni.ReprString(n.text) + ")"
 	}
 	return guarded(&n.irBase, n.guard, s)
 }
@@ -592,8 +595,8 @@ func (n *attrTail) py() []pyItem {
 	x := genName()
 	return []pyItem{
 		n.line(gen + " = self.__kj__.collect(" + gen + "())"),
-		n.line("for " + x + " in self.__kj__.render_attrs({" + pyre.StrRepr(n.p.attr) + ":" + gen + "}, " +
-			pyre.StrRepr(n.p.mode) + "):"),
+		n.line("for " + x + " in self.__kj__.render_attrs({" + pyuni.ReprString(n.p.attr) + ":" + gen + "}, " +
+			pyuni.ReprString(n.p.mode) + "):"),
 		n.line("    yield " + x),
 	}
 }
@@ -608,7 +611,7 @@ type attrsNode struct {
 func (n *attrsNode) nodes() iter.Seq[irNode] { return self(n) }
 func (n *attrsNode) py() []pyItem {
 	x := genName()
-	body := []string{"for " + x + " in self.__kj__.render_attrs(" + n.attrs + ", " + pyre.StrRepr(n.mode) + "):",
+	body := []string{"for " + x + " in self.__kj__.render_attrs(" + n.attrs + ", " + pyuni.ReprString(n.mode) + "):",
 		"    yield " + x}
 	if n.guard == "" {
 		return []pyItem{n.line(body[0]), n.line(body[1])}
@@ -643,7 +646,7 @@ func newPythonNode(text string) (*pythonNode, error) {
 	}
 	text = strings.TrimPrefix(text, "#\n")
 	prefix, first := "", true
-	for _, line := range splitLines(text) {
+	for _, line := range pyuni.SplitLines(text, false) {
 		if first {
 			prefix = line[:len(line)-len(lstrip(line))]
 			first = false
@@ -697,4 +700,33 @@ func defaultAliasFor(name string) string {
 		return base[:dot]
 	}
 	return base
+}
+
+// functionTable is the functions dict of the XML compiler and of the text
+// parser: the bodies of the template functions by declaration, in the order
+// the declarations were first defined (a later definition replaces the
+// body).
+type functionTable struct {
+	order  []string
+	bodies map[string][]irNode
+}
+
+// set is functions[decl] = body.
+func (t *functionTable) set(decl string, body []irNode) {
+	if t.bodies == nil {
+		t.bodies = map[string][]irNode{}
+	}
+	if _, ok := t.bodies[decl]; !ok {
+		t.order = append(t.order, decl)
+	}
+	t.bodies[decl] = body
+}
+
+// defs is the def node of each function, in order.
+func (t *functionTable) defs() []irNode {
+	defs := make([]irNode, len(t.order))
+	for i, decl := range t.order {
+		defs[i] = newDefNode(decl, t.bodies[decl])
+	}
+	return defs
 }

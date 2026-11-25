@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackrosenthal/kajiki-go/internal/py"
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 )
 
 // Error is an exception raised by Kajiki or by the Python a template runs.
@@ -41,8 +42,8 @@ func (e *Error) Error() string { return e.Message }
 // message and the snippet of the source around the line.
 func templateErrorText(msg, source, filename string, line int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[%s:%d] %s\n", filename, line, msg)
-	lines := splitLines(source)
+	b.WriteString(fmt.Sprintf("[%s:%d] %s\n", filename, line, msg))
+	lines := pyuni.SplitLines(source, false)
 	at := line - 1
 	for i := at - 2; i < at+2; i++ {
 		if i < 0 || i >= len(lines) {
@@ -52,7 +53,7 @@ func templateErrorText(msg, source, filename string, line int) string {
 		if i == at {
 			arrow = "-->"
 		}
-		fmt.Fprintf(&b, "\t %s %s\n", arrow, lines[i])
+		b.WriteString(fmt.Sprintf("\t %s %s\n", arrow, lines[i]))
 	}
 	return b.String()
 }

@@ -11,8 +11,8 @@ package pyre
 
 import (
 	"fmt"
+	"github.com/jackrosenthal/kajiki-go/internal/pyuni"
 	"strings"
-	"unicode/utf8"
 )
 
 // Error is re.error: an invalid pattern or replacement template.
@@ -484,7 +484,7 @@ func (m *Match) Expand(template string) (string, error) {
 // the matched text is cut to 50 characters (%.50R).
 func (m *Match) Repr() string {
 	s, _ := m.Group(0)
-	r := []rune(StrRepr(s))
+	r := []rune(pyuni.ReprString(s))
 	if len(r) > 50 {
 		r = r[:50]
 	}
@@ -502,8 +502,6 @@ func Escape(s string) string {
 	}
 	return b.String()
 }
-
-func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
 // Code returns the compiled program as _sre receives it, without the INFO block CPython
 // prepends (an optimisation only): what re._compiler._code gives after that block.
