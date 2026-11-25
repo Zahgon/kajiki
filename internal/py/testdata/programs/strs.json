@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "Hello World! 3.142      3.14159   World  |name='World'|n = 3.1\nnested World {literal} 26\n      3.14| 12,345,678 25.000000% 00101010 x****\na 3 2.50 'q'     r|l    | v\n1 two 3.0 aba 5    7\n'tab\\there' 'quote\"s' 'both\\'\"' ['multi', 'line']\nb'bytes' b'\\x00\\xff' b'\\xc3\\xa9' caf\u00e9\nABC x a+b True 1,2\nel olleH 5 xxx True 8364 \u20ac\n3 '\\xfc' '\\xfc'\n"
+}

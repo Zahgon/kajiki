@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "1267650600228229401496703205376 -4 1 -1 (-4, 1) 0.3333333333333333 1.0 0.30000000000000004 1e+301 -1e+301\n255 5 12 3 -3 0 2 2.67\ninf -inf nan 1e+16 1e-05 1.2345678901234568e+17 0.14285714285714285\n(3+4j) (5+5j) 5.0 (1+2j) (-4+0j)\n2 3 3.0 3.0 -0.0 True 10.0\n-1 7 1.0 2.5 24 0.5\nTrue True True True True\nZeroDivisionError division by zero\nZeroDivisionError integer modulo by zero\nValueError invalid literal for int() with base 10: 'x'\nValueError could not convert string to float: 'y'\nOverflowError (34, 'Numerical result out of range')\nTypeError '<' not supported between instances of 'list' and 'int'\n16 15 3 1000000 10.5 1000000000.0\n3 15 5 -8 1180591620717411303424 -1 15\n"
+}

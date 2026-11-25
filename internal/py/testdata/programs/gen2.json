@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "1\ninner got A\n2\ninner caught KeyError('kk')\nrecovered\ninner finally\nouter r inner-ret\nouter-last\ndone None\ngot GeneratorExit\nNone\nRuntimeError generator ignored GeneratorExit\ngenerator raised StopIteration StopIteration\n0 [1, 2] default\n0 1 0 1\ngenerator already executing\n<genexpr> <genexpr>\ngf gf generator\n[(0, 'a'), (1, 'b'), (2, 'c')]\ncleanup 0\ncleanup 1\nafter break\n"
+}

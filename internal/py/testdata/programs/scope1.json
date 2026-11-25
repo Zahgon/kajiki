@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "9 2\n1 2 3\nUnboundLocalError: cannot access local variable 'y' where it is not associated with a value\nNameError: name 'undefined_name' is not defined\nNameError cannot access free variable 'a' where it is not associated with a value in enclosing scope\n[2, 2, 2]\n[0, 1, 2]\nname 'v' is not defined\n10 10\n[0, 2, 4] 4\nname 'x' is not defined\n"
+}

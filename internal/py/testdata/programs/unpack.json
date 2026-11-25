@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "[1, 2, 1, 2] (1, 2) {1, 2, 3} {'x': 1, 'y': 2} {'x': 9}\n((1, 2, 0, 1, 2), {'x': 1, 'z': 1})\nh ['e', 'l', 'l', 'o']\n[] 1\n1 2 [3, 4]\n1 2 3\n{'k': 1, 'j': 2}\n['a', 0, 'c']\n['a', 7, 8, 9, 'c']\n[7, 9]\n5 5 5\n1 [10, 99]\n__main__.f() got multiple values for keyword argument 'a'\nprint() argument after * must be an iterable, not int\nValue after * must be an iterable, not NoneType\n'list' object is not a mapping\nc b a\n"
+}

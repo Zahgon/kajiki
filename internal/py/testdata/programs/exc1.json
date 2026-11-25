@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "ValueError('wrapped') ZeroDivisionError('division by zero') True ZeroDivisionError('division by zero')\nKeyError('k') None False\nNone True\nfinally\n1\nbody 0\nfin 0\nfin 1\nbody 2\nfin 2\ncleanup\ncaught (1,)\nelse\nMyErr<(1,) 2> MyErr(1) (1,)\nException()\ntuple catch IndexError\nname 'err' is not defined\nValueError v\nNone\nexceptions must derive from BaseException\nreraise division by zero\nassert nope\n"
+}

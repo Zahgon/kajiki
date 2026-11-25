@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "Child:Child(3) 6 Child:Child(5) 2 2 None Base doc\n5 True 1\n(<class '__main__.Child'>, <class '__main__.Base'>, <class 'object'>) Child Child __main__\nTrue True True\n7 Meta\n[('R1', 'one'), ('R2', None)]\nTrue\n'D' object has no attribute 'b'\nE1>B1>C1>A1 ['E1', 'B1', 'C1', 'A1', 'object']\nOuter.Inner Outer.Inner.m\n3 False [0, 10, 20] True False ((1,), {'z': 2})\nV3 V7 V6 [V1, V2, V3] V9\nunsupported operand type(s) for -: 'V' and 'V'\nHELLO\nX False {'x': 1, 'y': 0}\n"
+}

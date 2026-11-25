@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "init_subclass B {'flag': 1}\ninit_subclass C {}\nB.make\nA.make B\nA init\nB init\nC new C\nA init\nB init\nHI HI! S True 2 True 'HI' hi str\nI(5) 6 int I(5) 10 I(5) I(5)\n[1, 2] 2 L 1 [1, 2, 3] list\n1 zzzz {'a': 1} D\n(1, 2) (1, 2)\nboom 7 ('boom',) E('boom')\nD+M1+M2+Base\nCannot create a consistent method resolution\norder (MRO) for bases Base, M2\n2.5 2.0 0.1\n"
+}

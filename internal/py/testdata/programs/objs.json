@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "unset\n10 10 Desc\n42 30\ndeleting v\nFalse\n4\ndel x\nNone\nAE 'NoneType' object has no attribute '_x'\nproperty 'r' of 'RO' object has no setter\n1 False\n'Sl' object has no attribute 'c'\n'Sl' object has no attribute '__dict__'\n2 T (<class '__main__.T'>, <class 'object'>)\nprepare W\nMC call (3,)\n3 7 MC True\nCG[<class 'int'>]\nF<> F<xyz> R S F<q> S R [R]\nTrue True True True True\nunhashable type: 'Cmp'\n5 -5 2 inv pos 10 10 div fdiv mod pow matmul and or xor lshift rshift\n20 7 2.0 0xff 0b10\n[1, 2, 3] 6 True [3, 2, 1]\n[0, 1, 4, 9] True [2, 1]\nFalse True no\n__bool__ should return bool, returned int\nTrue False True True\n'object' object has no attribute 'x'\nTrue True True {}\ndflt\n'Empty' object has no attribute 'nope'\n9\nFalse\n(<class '__main__.A'>,) [<class '__main__.B'>] <class '__main__.A'>\n"
+}

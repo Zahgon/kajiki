@@ -1,0 +1,45 @@
+srcs = [
+    "return 1",
+    "x = 1\nbreak",
+    "for i in x:\n    pass\ncontinue",
+    "def f(a, b, a): pass",
+    "def f(a, *, b, **b): pass",
+    "lambda x, x: 1",
+    "nonlocal x",
+    "global x\nnonlocal y",
+    "def f():\n    nonlocal q",
+    "def f():\n    x = 1\n    global x",
+    "def f():\n    print(x)\n    global x",
+    "def f(x):\n    global x",
+    "def f(x):\n    nonlocal x",
+    "def f():\n    x = 1\n    def g():\n        global x\n        nonlocal x",
+    "yield 1",
+    "class C:\n    yield 1",
+    "[(yield x) for x in y]",
+    "await x",
+    "def f():\n    await x",
+    "f(a=1, a=2)",
+    "*a = 1",
+    "a, *b, *c = d",
+    "print(*a for a in b)",
+    "def f():\n    x = 1\n    def g():\n        nonlocal x\n        x = 2\n    return g",
+    "match x:\n    case y:\n        pass\n    case 1:\n        pass",
+    "match x:\n    case _:\n        pass\n    case 1:\n        pass",
+    "match x:\n    case [a, a]:\n        pass",
+    "match x:\n    case 1 | y:\n        pass",
+    "match x:\n    case y | z:\n        pass",
+    "match x:\n    case {'a': 1, 'a': 2}:\n        pass",
+    "class C:\n    def f(self):\n        nonlocal __class__",
+    "def f():\n    global x\n    x = 1\n    def g():\n        nonlocal x",
+    "async def f():\n    yield from x",
+    "async def f():\n    yield 1\n    return 2",
+    "def f():\n    class C:\n        nonlocal y\n    y = 1",
+    "del f()",
+    "(a, b) += 1",
+]
+for s in srcs:
+    try:
+        compile(s, "prog.hy", "exec")
+        print("OK", repr(s))
+    except SyntaxError as e:
+        print(repr(s), "->", e.msg, e.lineno, e.offset, e.end_lineno, e.end_offset, repr(e.text))

@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "[10, 11, 12]\n2\n('local', ['local'])\nglobal\nchanged\n21\n2432902008176640000\nRecursionError maximum recursion depth exceeded\n{'a': 'A', 'b': 'B'}\ncannot access free variable 'v' where it is not associated with a value in enclosing scope\n6\n[0, 5, 10]\n2\ngenerator\n"
+}

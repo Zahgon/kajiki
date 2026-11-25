@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "outer.<locals>.inner inner\nouter.<locals>.<lambda> <lambda>\nouter.<locals>.<lambda> <lambda>\nouter.<locals>.<genexpr>.<lambda> <lambda>\nouter.<locals>.K K\nouter.<locals>.K.m m\nouter.<locals>.K.<lambda> <lambda>\n<genexpr> outer\n['a', 'b', 'c', 'd', 'e', 'x']\n{'a': 1, 'b': 2, 'd': 4, 'c': (), 'e': {}, 'x': 1}\nTrue tuple\nA __main__ ['__module__', '__qualname__']\nTrue\ncannot access local variable 'x' where it is not associated with a value\n"
+}

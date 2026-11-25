@@ -1,0 +1,5 @@
+{
+ "status": 1,
+ "stderr": "Traceback (most recent call last):\nKeyError: 'k'\n",
+ "stdout": "F:bad (f.hy, line 2)\nTrue True False True True\nM('ab') M([1]) True <slot wrapper '__ne__' of 'object' objects>\nxa ab str (1, 2) [1, 2]\n"
+}

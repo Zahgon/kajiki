@@ -1,0 +1,5 @@
+{
+ "status": 0,
+ "stderr": "",
+ "stdout": "['note1']\nnote must be a str, not 'int'\ny 5 None\nKeyError() takes no keyword arguments\n(<class 'BaseException'>,) (<class 'Exception'>,) (<class 'object'>,) () (<class 'int'>,)\n{'__notes__': ['note1'], 'foo': 3} <slot wrapper '__init__' of 'Exception' objects>\n{'a': 1, '__module__': '__main__', '__dict__': <attribute '__dict__' of 'T' objects>, '__weakref__': <attribute '__weakref__' of 'T' objects>, '__doc__': None}\ndict_keys(['__module__', 'x', '__dict__', '__weakref__', '__doc__']) ['__module__', 'x', '__dict__', '__weakref__', '__doc__']\n['__module__', 'y', '__doc__']\n['__module__', '__weakref__', '__doc__']\n['__module__', '__dict__', '__weakref__', '__doc__']\n['__module__', '__slots__', 'a', '__doc__']\nNone {'__module__': '__ma mappingproxy({'__mod\n"
+}
