@@ -502,18 +502,11 @@ func sequenceMixins(ms *methods) {
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range all {
-			eq := Is(v, args[1])
-			if !eq {
-				if eq, err = Compare("==", v, args[1]); err != nil {
-					return nil, err
-				}
-			}
-			if eq {
-				return Bool(true), nil
-			}
+		i, err := seqFindEq(all, args[1], 0)
+		if err != nil {
+			return nil, err
 		}
-		return Bool(false), nil
+		return Bool(i >= 0), nil
 	})
 	ms.method("__reversed__", func(args []Value, _ []Keyword) (Value, error) {
 		n, err := Len(args[0])
@@ -535,16 +528,12 @@ func sequenceMixins(ms *methods) {
 		if err != nil {
 			return nil, err
 		}
-		for i, v := range all {
-			eq := Is(v, args[1])
-			if !eq {
-				if eq, err = Compare("==", v, args[1]); err != nil {
-					return nil, err
-				}
-			}
-			if eq {
-				return Int(int64(i)), nil
-			}
+		i, err := seqFindEq(all, args[1], 0)
+		if err != nil {
+			return nil, err
+		}
+		if i >= 0 {
+			return Int(int64(i)), nil
 		}
 		return nil, Raise("ValueError")
 	})
@@ -553,19 +542,7 @@ func sequenceMixins(ms *methods) {
 		if err != nil {
 			return nil, err
 		}
-		n := 0
-		for _, v := range all {
-			eq := Is(v, args[1])
-			if !eq {
-				if eq, err = Compare("==", v, args[1]); err != nil {
-					return nil, err
-				}
-			}
-			if eq {
-				n++
-			}
-		}
-		return Int(int64(n)), nil
+		return seqCountEq(all, args[1])
 	})
 }
 

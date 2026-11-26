@@ -8,6 +8,7 @@ With a third argument it also writes the full per-code-point dump (about 60 MB) 
     docker run --rm --network none -e PYTHONHASHSEED=0 -v $PWD:/w -w /w <pinned python:3.12 image> \
         python3 gen/dump.py testdata/codepoints.sha256 testdata/strings.json [full-dump.txt]
 """
+import contextlib
 import hashlib
 import json
 import random
@@ -48,12 +49,13 @@ def line(c):
 
 def main():
     h = hashlib.sha256()
-    full = open(sys.argv[3], "w", encoding="ascii") if len(sys.argv) > 3 else None
-    for c in range(MAX):
-        ln = line(c)
-        h.update(ln.encode("ascii"))
-        if full:
-            full.write(ln)
+    # The optional third argument also writes every line in full, for diffing two Pythons.
+    with open(sys.argv[3], "w", encoding="ascii") if len(sys.argv) > 3 else contextlib.nullcontext() as full:
+        for c in range(MAX):
+            ln = line(c)
+            h.update(ln.encode("ascii"))
+            if full:
+                full.write(ln)
     with open(sys.argv[1], "w") as f:
         f.write(h.hexdigest() + "\n")
     rnd = random.Random(20261030)

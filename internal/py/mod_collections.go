@@ -137,6 +137,42 @@ func seqCompare(op string, a, b []Value) (Value, error) {
 	return RichCompare(op, a[i], b[i])
 }
 
+// seqFindEq is the scan deque.index, deque.remove, deque.__contains__ and the
+// Sequence mixins share: the index of the first item of items[start:] that
+// is v or compares == to it (the item on the left), or -1.
+func seqFindEq(items []Value, v Value, start int) (int, error) {
+	for i := max(start, 0); i < len(items); i++ {
+		if Is(items[i], v) {
+			return i, nil
+		}
+		eq, err := Compare("==", items[i], v)
+		if err != nil {
+			return 0, err
+		}
+		if eq {
+			return i, nil
+		}
+	}
+	return -1, nil
+}
+
+// seqCountEq is deque.count and Sequence.count: how many items are v or
+// compare == to it, scanned as seqFindEq scans.
+func seqCountEq(items []Value, v Value) (Value, error) {
+	n := 0
+	for i := 0; ; i++ {
+		j, err := seqFindEq(items, v, i)
+		if err != nil {
+			return nil, err
+		}
+		if j < 0 {
+			return Int(int64(n)), nil
+		}
+		n++
+		i = j
+	}
+}
+
 func dequeMethods(iterCls Value) *methods {
 	ms := &methods{}
 	self := func(args []Value, name string) (*dequeState, error) { return dequeOf(args[0], name) }
@@ -254,20 +290,7 @@ func dequeMethods(iterCls Value) *methods {
 		return nil, nil
 	})
 	oneArg("count", func(d *dequeState, _, v Value) (Value, error) {
-		n := 0
-		for _, it := range d.items {
-			eq := Is(it, v)
-			if !eq {
-				var err error
-				if eq, err = Compare("==", it, v); err != nil {
-					return nil, err
-				}
-			}
-			if eq {
-				n++
-			}
-		}
-		return Int(int64(n)), nil
+		return seqCountEq(d.items, v)
 	})
 	ms.method("index", func(args []Value, kwargs []Keyword) (Value, error) {
 		d, err := self(args, "index")
@@ -301,16 +324,12 @@ func dequeMethods(iterCls Value) *methods {
 				return nil, err
 			}
 		}
-		for i := start; i < stop && i < len(d.items); i++ {
-			eq := Is(d.items[i], args[1])
-			if !eq {
-				if eq, err = Compare("==", d.items[i], args[1]); err != nil {
-					return nil, err
-				}
-			}
-			if eq {
-				return Int(int64(i)), nil
-			}
+		i, err := seqFindEq(d.items[:max(stop, 0)], args[1], start)
+		if err != nil {
+			return nil, err
+		}
+		if i >= 0 {
+			return Int(int64(i)), nil
 		}
 		r, err := Repr(args[1])
 		if err != nil {
@@ -346,19 +365,14 @@ func dequeMethods(iterCls Value) *methods {
 		return nil, nil
 	})
 	oneArg("remove", func(d *dequeState, _, v Value) (Value, error) {
-		for i, it := range d.items {
-			eq := Is(it, v)
-			if !eq {
-				var err error
-				if eq, err = Compare("==", it, v); err != nil {
-					return nil, err
-				}
-			}
-			if eq {
-				d.items = append(d.items[:i], d.items[i+1:]...)
-				d.state++
-				return nil, nil
-			}
+		i, err := seqFindEq(d.items, v, 0)
+		if err != nil {
+			return nil, err
+		}
+		if i >= 0 {
+			d.items = append(d.items[:i], d.items[i+1:]...)
+			d.state++
+			return nil, nil
 		}
 		return nil, raise("ValueError", "deque.remove(x): x not in deque")
 	})
@@ -403,19 +417,11 @@ func dequeMethods(iterCls Value) *methods {
 		return nil, nil
 	})
 	oneArg("__contains__", func(d *dequeState, _, v Value) (Value, error) {
-		for _, it := range d.items {
-			eq := Is(it, v)
-			if !eq {
-				var err error
-				if eq, err = Compare("==", it, v); err != nil {
-					return nil, err
-				}
-			}
-			if eq {
-				return Bool(true), nil
-			}
+		i, err := seqFindEq(d.items, v, 0)
+		if err != nil {
+			return nil, err
 		}
-		return Bool(false), nil
+		return Bool(i >= 0), nil
 	})
 	iterOver := func(reverse bool) func(d *dequeState, _ Value) (Value, error) {
 		return func(d *dequeState, _ Value) (Value, error) {
