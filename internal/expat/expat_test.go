@@ -131,6 +131,11 @@ func TestDocumentsAgainstPyexpat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := zr.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	sc := bufio.NewScanner(zr)
 	sc.Buffer(nil, 1<<24)
 	n, bad := 0, 0

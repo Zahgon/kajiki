@@ -118,20 +118,12 @@ func newDequeLike(self Value, d *dequeState, items []Value) (Value, error) {
 	return Call(TypeOf(self), []Value{List(items...), maxlen}, nil)
 }
 
-// seqEqual compares two item lists as list == list does.
+// seqCompare is deque_richcompare: the first pair of items that differ
+// decides, else the lengths do.
 func seqCompare(op string, a, b []Value) (Value, error) {
-	i := 0
-	for ; i < len(a) && i < len(b); i++ {
-		if Is(a[i], b[i]) {
-			continue
-		}
-		eq, err := Compare("==", a[i], b[i])
-		if err != nil {
-			return nil, err
-		}
-		if !eq {
-			break
-		}
+	i, err := seqFirstDiff(a, b, func(x, y Value) (bool, error) { return Compare("==", x, y) })
+	if err != nil {
+		return nil, err
 	}
 	if i >= len(a) || i >= len(b) {
 		return RichCompare(op, Int(int64(len(a))), Int(int64(len(b))))
@@ -1097,12 +1089,11 @@ func counterBinary(op string, a, b Value) (Value, error) {
 	if !isCounter(b) {
 		return NotImplemented(), nil
 	}
-	result, err := call(TypeOf(a))
+	// Counter.__add__ and its siblings build a plain Counter(), whatever the
+	// type of self is (Lib/collections/__init__.py).
+	result, err := newCounter()
 	if err != nil {
-		result, err = newCounter(a)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	keepPositive := func(k, v Value) error {
 		pos, err := Compare(">", v, Int(0))
@@ -1171,7 +1162,7 @@ func counterBinary(op string, a, b Value) (Value, error) {
 }
 
 // newCounter makes an empty collections.Counter for a result.
-func newCounter(like Value) (Value, error) {
+func newCounter() (Value, error) {
 	mod, err := ImportModule("collections", "")
 	if err != nil {
 		return nil, err
@@ -1206,7 +1197,7 @@ func counterInplace(op string, a, b Value) (Value, error) {
 // counterUnary is +counter (positive counts) or -counter (negated negative
 // counts).
 func counterUnary(a Value, neg bool) (Value, error) {
-	result, err := newCounter(a)
+	result, err := newCounter()
 	if err != nil {
 		return nil, err
 	}

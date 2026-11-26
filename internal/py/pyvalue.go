@@ -665,21 +665,33 @@ func seqPair(a, b Value) ([]Value, []Value, bool) {
 	return nil, nil, false
 }
 
-// seqRichCompare is list_richcompare / tuple_richcompare for an ordering
-// operator: the first pair of items that differ is compared with op itself.
-func seqRichCompare(op string, a, b []Value) (bool, error) {
+// seqFirstDiff is the scan list_richcompare, tuple_richcompare and
+// deque_richcompare share: the index of the first pair of items that are
+// neither the same object nor equal under eq, or the shorter length when
+// there is none.
+func seqFirstDiff(a, b []Value, eq func(x, y Value) (bool, error)) (int, error) {
 	i := 0
 	for ; i < len(a) && i < len(b); i++ {
 		if sameObject(a[i], b[i]) {
 			continue
 		}
-		eq, err := pyEq(a[i], b[i])
+		same, err := eq(a[i], b[i])
 		if err != nil {
-			return false, err
+			return 0, err
 		}
-		if !eq {
+		if !same {
 			break
 		}
+	}
+	return i, nil
+}
+
+// seqRichCompare is list_richcompare / tuple_richcompare for an ordering
+// operator: the first pair of items that differ is compared with op itself.
+func seqRichCompare(op string, a, b []Value) (bool, error) {
+	i, err := seqFirstDiff(a, b, pyEq)
+	if err != nil {
+		return false, err
 	}
 	if i >= len(a) || i >= len(b) {
 		la, lb := len(a), len(b)

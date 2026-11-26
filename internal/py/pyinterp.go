@@ -65,6 +65,9 @@ func Init(cfg Config) {
 	if cfg.Stdin == nil {
 		cfg.Stdin = strings.NewReader("")
 	}
+	// The interpreter is a library with no console of its own: a caller that
+	// wants print() output or warnings shown passes its own writers (for
+	// example os.Stdout and os.Stderr); with none, they are dropped.
 	if cfg.Stdout == nil {
 		cfg.Stdout = io.Discard
 	}

@@ -788,17 +788,8 @@ func (d *jsonDecoder) str(i int) (Value, int, error) {
 				i += 6
 			}
 		}
-		b.WriteString(string(appendCodePoint(nil, u)))
+		b.WriteString(string(appendRune(nil, u)))
 	}
-}
-
-// appendCodePoint appends r as the str runtime stores it, lone surrogates
-// included.
-func appendCodePoint(b []byte, r rune) []byte {
-	if r >= 0xd800 && r <= 0xdfff {
-		return append(b, byte(0xe0|r>>12), byte(0x80|r>>6&0x3f), byte(0x80|r&0x3f))
-	}
-	return append(b, string(r)...)
 }
 
 func (d *jsonDecoder) hex4At(i int) (rune, bool) {
