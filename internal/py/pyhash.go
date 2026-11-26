@@ -31,6 +31,10 @@ func pyHash(v Value) (int64, error) {
 		return h, err
 	}
 	v = unsub(v)
+	if p, ok := v.(*mappingProxyV); ok {
+		// mappingproxy_hash hashes the mapping it views.
+		return pyHash(p.d)
+	}
 	switch x := v.(type) {
 	case noneV:
 		return 0xFCA86420, nil

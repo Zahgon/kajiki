@@ -32,7 +32,7 @@ var patternFlagNames = []struct {
 
 // reModule holds the classes of the re module the functions need.
 type reModule struct {
-	flagCls, patternCls, matchCls, errCls, proxyCls, iterCls Value
+	flagCls, patternCls, matchCls, errCls, iterCls Value
 }
 
 func init() {
@@ -42,7 +42,6 @@ func init() {
 		m.flagCls = b.class("RegexFlag", []Value{Builtin("int")}, regexFlagMethods(m))
 		m.errCls = b.class("error", []Value{Builtin("Exception")}, reErrorMethods())
 		b.set("PatternError", m.errCls)
-		m.proxyCls = b.newClass("mappingproxy", object, mappingProxyMethods())
 		m.iterCls = b.newClass("callable_iterator", object, iterMethods("callable_iterator"))
 		m.patternCls = b.cClass("Pattern", object, patternMethods(m))
 		m.matchCls = b.cClass("Match", object, matchMethods(m))
@@ -746,7 +745,9 @@ func patternMethods(m *reModule) *methods {
 		for i, n := range names {
 			vals[i] = Int(int64(gi[n]))
 		}
-		return call(m.proxyCls, StrDict(names, vals))
+		// Pattern.groupindex is a read-only mappingproxy of a dict, the type
+		// a class namespace is too.
+		return &mappingProxyV{d: StrDict(names, vals).(*dictV)}, nil
 	})
 	ms.method("__repr__", func(args []Value, _ []Keyword) (Value, error) {
 		st, err := patternOf(args[0])
@@ -1004,42 +1005,5 @@ func matchMethods(m *reModule) *methods {
 			strconv.Itoa(st.m.End(0)) + "), match=" + strPrefix(r, 50) + ">"), nil
 	})
 	ms.method("__bool__", func(args []Value, _ []Keyword) (Value, error) { return Bool(true), nil })
-	return ms
-}
-
-// mappingProxyMethods is the namespace of the read-only view of a dict
-// that Pattern.groupindex is.
-func mappingProxyMethods() *methods {
-	ms := &methods{}
-	ms.method("__init__", func(args []Value, _ []Keyword) (Value, error) {
-		return nil, SetNative(args[0], args[1])
-	})
-	mapping := func(self Value) Value {
-		if d, ok := Native(self).(Value); ok {
-			return d
-		}
-		return EmptyDict()
-	}
-	for _, name := range []string{"__getitem__", "__len__", "__iter__", "__contains__", "keys", "values", "items",
-		"get", "copy"} {
-		name := name
-		ms.method(name, func(args []Value, kwargs []Keyword) (Value, error) {
-			return CallMethodKw(mapping(args[0]), name, args[1:], kwargs)
-		})
-	}
-	ms.method("__repr__", func(args []Value, _ []Keyword) (Value, error) {
-		r, err := Repr(mapping(args[0]))
-		if err != nil {
-			return nil, err
-		}
-		return String("mappingproxy(" + r + ")"), nil
-	})
-	ms.method("__str__", func(args []Value, _ []Keyword) (Value, error) {
-		s, err := Str(mapping(args[0]))
-		return String(s), err
-	})
-	ms.method("__eq__", func(args []Value, _ []Keyword) (Value, error) {
-		return RichCompare("==", mapping(args[0]), args[1])
-	})
 	return ms
 }

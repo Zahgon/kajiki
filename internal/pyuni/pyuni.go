@@ -273,26 +273,6 @@ func LowerRunes(rs []rune) []rune {
 	return out
 }
 
-// Upper is str.upper(): the full uppercase mapping.
-func Upper(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		writeMapped(&b, fullUpperRuns, fullUpperSpecial, r)
-	}
-	return b.String()
-}
-
-// CaseFold is str.casefold(): the full case folding.
-func CaseFold(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		writeMapped(&b, fullFoldRuns, fullFoldSpecial, r)
-	}
-	return b.String()
-}
-
 // SplitLines is str.splitlines(keepends) of the UTF-8 text s: it breaks at
 // every character IsLineBreak accepts, reading "\r\n" as one break, and
 // gives no empty last line for a trailing break.

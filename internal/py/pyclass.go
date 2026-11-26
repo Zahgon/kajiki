@@ -2216,6 +2216,15 @@ func (m *mappingProxyV) iter() (iterator, error) { return pyIter(m.d) }
 
 func (m *mappingProxyV) length() (int, error) { return m.d.Len(), nil }
 
+// eq is mappingproxy's ==: the comparison of the mapping it views, so a
+// proxy equals a dict with the same items (mappingproxy_richcompare).
+func (m *mappingProxyV) eq(other Value) (bool, error) {
+	if o, ok := other.(*mappingProxyV); ok {
+		other = o.d
+	}
+	return pyEq(m.d, other)
+}
+
 func (m *mappingProxyV) getAttr(name string) (Value, error) {
 	switch name {
 	case "keys", "values", "items", "get", "copy", "__getitem__", "__contains__", "__len__", "__iter__":

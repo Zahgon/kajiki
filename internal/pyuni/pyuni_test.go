@@ -71,7 +71,7 @@ func TestAllCodePoints(t *testing.T) {
 		ln := dumpLine(c)
 		if c < 0xd800 || c > 0xdfff {
 			s := string(c)
-			if Lower(s) != string(LowerRune(c)) || Upper(s) != string(UpperRune(c)) || CaseFold(s) != string(CaseFoldRune(c)) {
+			if Lower(s) != string(LowerRune(c)) {
 				t.Errorf("string and rune mappings of %x disagree", c)
 			}
 		}
@@ -123,13 +123,23 @@ func TestStrings(t *testing.T) {
 		if got := string(LowerRunes([]rune(c[0]))); got != c[1] {
 			t.Errorf("LowerRunes(%+q) = %+q, want %+q", c[0], got, c[1])
 		}
-		if got := Upper(c[0]); got != c[2] {
-			t.Errorf("Upper(%+q) = %+q, want %+q", c[0], got, c[2])
+		if got := mapString(c[0], UpperRune); got != c[2] {
+			t.Errorf("UpperRune over %+q = %+q, want %+q", c[0], got, c[2])
 		}
-		if got := CaseFold(c[0]); got != c[3] {
-			t.Errorf("CaseFold(%+q) = %+q, want %+q", c[0], got, c[3])
+		if got := mapString(c[0], CaseFoldRune); got != c[3] {
+			t.Errorf("CaseFoldRune over %+q = %+q, want %+q", c[0], got, c[3])
 		}
 	}
+}
+
+// mapString is str.upper() or str.casefold() built from the rune mapping f, as
+// internal/py's str methods build them.
+func mapString(s string, f func(rune) []rune) string {
+	var b strings.Builder
+	for _, r := range s {
+		b.WriteString(string(f(r)))
+	}
+	return b.String()
 }
 
 // TestKnownValues pins a few values where CPython 3.12 (Unicode 15.0.0) differs from Go's
@@ -144,9 +154,9 @@ func TestKnownValues(t *testing.T) {
 		{"Lower(Σ)", Lower("Σ"), "σ"},
 		{"Lower(ΑΣα)", Lower("ΑΣα"), "ασα"},
 		{"Lower(İ)", Lower("İ"), "i\u0307"},
-		{"Upper(ß)", Upper("ß"), "SS"},
-		{"CaseFold(ß)", CaseFold("ß"), "ss"},
-		{"CaseFold(ﬃ)", CaseFold("ﬃ"), "ffi"},
+		{"UpperRune(ß)", string(UpperRune('ß')), "SS"},
+		{"CaseFoldRune(ß)", string(CaseFoldRune('ß')), "ss"},
+		{"CaseFoldRune(ﬃ)", string(CaseFoldRune('ﬃ')), "ffi"},
 		{"SimpleLower(İ)", SimpleLower('İ'), 'i'},
 		{"SimpleUpper(ß)", SimpleUpper('ß'), 'S'},
 		{"SimpleUpper(ſ)", SimpleUpper('ſ'), 'S'},

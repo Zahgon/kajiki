@@ -417,6 +417,11 @@ func pyEq(a, b Value) (bool, error) {
 		}
 		return seqEq(x.items, y.items)
 	case *dictV:
+		if p, ok := b.(*mappingProxyV); ok {
+			// dict.__eq__ gives NotImplemented and the proxy's reflected
+			// == compares the dict it views.
+			return dictEq(x, p.d)
+		}
 		y, ok := b.(*dictV)
 		if !ok {
 			return false, nil
