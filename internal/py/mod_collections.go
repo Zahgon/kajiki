@@ -137,42 +137,6 @@ func seqCompare(op string, a, b []Value) (Value, error) {
 	return RichCompare(op, a[i], b[i])
 }
 
-// seqFindEq is the scan deque.index, deque.remove, deque.__contains__ and the
-// Sequence mixins share: the index of the first item of items[start:] that
-// is v or compares == to it (the item on the left), or -1.
-func seqFindEq(items []Value, v Value, start int) (int, error) {
-	for i := max(start, 0); i < len(items); i++ {
-		if Is(items[i], v) {
-			return i, nil
-		}
-		eq, err := Compare("==", items[i], v)
-		if err != nil {
-			return 0, err
-		}
-		if eq {
-			return i, nil
-		}
-	}
-	return -1, nil
-}
-
-// seqCountEq is deque.count and Sequence.count: how many items are v or
-// compare == to it, scanned as seqFindEq scans.
-func seqCountEq(items []Value, v Value) (Value, error) {
-	n := 0
-	for i := 0; ; i++ {
-		j, err := seqFindEq(items, v, i)
-		if err != nil {
-			return nil, err
-		}
-		if j < 0 {
-			return Int(int64(n)), nil
-		}
-		n++
-		i = j
-	}
-}
-
 func dequeMethods(iterCls Value) *methods {
 	ms := &methods{}
 	self := func(args []Value, name string) (*dequeState, error) { return dequeOf(args[0], name) }
@@ -290,7 +254,11 @@ func dequeMethods(iterCls Value) *methods {
 		return nil, nil
 	})
 	oneArg("count", func(d *dequeState, _, v Value) (Value, error) {
-		return seqCountEq(d.items, v)
+		n, err := seqScanCount(d.items, v, pyCompareEq)
+		if err != nil {
+			return nil, err
+		}
+		return Int(int64(n)), nil
 	})
 	ms.method("index", func(args []Value, kwargs []Keyword) (Value, error) {
 		d, err := self(args, "index")
@@ -324,7 +292,7 @@ func dequeMethods(iterCls Value) *methods {
 				return nil, err
 			}
 		}
-		i, err := seqFindEq(d.items[:max(stop, 0)], args[1], start)
+		i, err := seqScan(d.items, args[1], start, stop, pyCompareEq)
 		if err != nil {
 			return nil, err
 		}
@@ -365,7 +333,7 @@ func dequeMethods(iterCls Value) *methods {
 		return nil, nil
 	})
 	oneArg("remove", func(d *dequeState, _, v Value) (Value, error) {
-		i, err := seqFindEq(d.items, v, 0)
+		i, err := seqScan(d.items, v, 0, len(d.items), pyCompareEq)
 		if err != nil {
 			return nil, err
 		}
@@ -417,7 +385,7 @@ func dequeMethods(iterCls Value) *methods {
 		return nil, nil
 	})
 	oneArg("__contains__", func(d *dequeState, _, v Value) (Value, error) {
-		i, err := seqFindEq(d.items, v, 0)
+		i, err := seqScan(d.items, v, 0, len(d.items), pyCompareEq)
 		if err != nil {
 			return nil, err
 		}
@@ -634,11 +602,7 @@ func baseDictRepr(v Value) (string, error) {
 // dictKeys is list(d) of a dict or an instance of a subclass, without
 // calling an overridden __iter__.
 func dictKeys(v Value) []Value {
-	base := v
-	if b, ok := BaseValue(v); ok {
-		base = b
-	}
-	keys, _, _ := DictItems(base)
+	keys, _ := dictPairs(v)
 	return keys
 }
 

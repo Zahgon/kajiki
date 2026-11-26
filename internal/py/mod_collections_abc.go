@@ -502,7 +502,7 @@ func sequenceMixins(ms *methods) {
 		if err != nil {
 			return nil, err
 		}
-		i, err := seqFindEq(all, args[1], 0)
+		i, err := seqScan(all, args[1], 0, len(all), pyCompareEq)
 		if err != nil {
 			return nil, err
 		}
@@ -528,7 +528,7 @@ func sequenceMixins(ms *methods) {
 		if err != nil {
 			return nil, err
 		}
-		i, err := seqFindEq(all, args[1], 0)
+		i, err := seqScan(all, args[1], 0, len(all), pyCompareEq)
 		if err != nil {
 			return nil, err
 		}
@@ -542,7 +542,11 @@ func sequenceMixins(ms *methods) {
 		if err != nil {
 			return nil, err
 		}
-		return seqCountEq(all, args[1])
+		n, err := seqScanCount(all, args[1], pyCompareEq)
+		if err != nil {
+			return nil, err
+		}
+		return Int(int64(n)), nil
 	})
 }
 

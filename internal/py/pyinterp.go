@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strings"
 )
@@ -19,7 +20,8 @@ import (
 type Config struct {
 	// Stdin is what input() reads lines from, Stdout is where print()
 	// writes when no file is given and Stderr is where warnings are shown.
-	// Nil means no input or no output.
+	// A nil Stdin reads nothing, a nil Stdout drops the output and a nil
+	// Stderr is os.Stderr.
 	Stdin          io.Reader
 	Stdout, Stderr io.Writer
 	// LauncherFrames is the number of Python frames the program that
@@ -65,14 +67,14 @@ func Init(cfg Config) {
 	if cfg.Stdin == nil {
 		cfg.Stdin = strings.NewReader("")
 	}
-	// The interpreter is a library with no console of its own: a caller that
-	// wants print() output or warnings shown passes its own writers (for
-	// example os.Stdout and os.Stderr); with none, they are dropped.
+	// Warnings and unraisable exceptions go to the process's stderr, as
+	// CPython shows them. print() without a file has no console in a library:
+	// a caller that wants it passes its own Stdout; with none it is dropped.
 	if cfg.Stdout == nil {
 		cfg.Stdout = io.Discard
 	}
 	if cfg.Stderr == nil {
-		cfg.Stderr = io.Discard
+		cfg.Stderr = os.Stderr
 	}
 	interp.stdin = bufio.NewReader(cfg.Stdin)
 	interp.stdout = cfg.Stdout

@@ -12,6 +12,47 @@ import (
 	"math/big"
 )
 
+// seqScan is the item scan list, tuple, deque and the Sequence mixins share
+// for index, count, remove and in: the index of the first item of
+// items[start:stop] that is v or that eq finds equal to it (the item on the
+// left of ==), or -1. list and tuple compare with pyEq; deque and the mixins
+// with ==, through Compare, as their CPython counterparts do.
+func seqScan(items []Value, v Value, start, stop int, eq func(a, b Value) (bool, error)) (int, error) {
+	for i := max(start, 0); i < stop && i < len(items); i++ {
+		if sameObject(items[i], v) {
+			return i, nil
+		}
+		same, err := eq(items[i], v)
+		if err != nil {
+			return 0, err
+		}
+		if same {
+			return i, nil
+		}
+	}
+	return -1, nil
+}
+
+// seqScanCount is how many items seqScan finds, scanning on from each hit.
+func seqScanCount(items []Value, v Value, eq func(a, b Value) (bool, error)) (int, error) {
+	n := 0
+	for i := 0; ; i++ {
+		j, err := seqScan(items, v, i, len(items), eq)
+		if err != nil {
+			return 0, err
+		}
+		if j < 0 {
+			return n, nil
+		}
+		n++
+		i = j
+	}
+}
+
+// pyCompareEq is == through Compare, the comparison deque and the Sequence
+// mixins use.
+func pyCompareEq(a, b Value) (bool, error) { return Compare("==", a, b) }
+
 // methodsSeqFind returns the index of the first item in items[start:stop] equal to
 // v (the item on the left of ==, identity first), or -1. start and stop are
 // clamped as list.index and tuple.index clamp them.
@@ -23,36 +64,14 @@ func methodsSeqFind(items []Value, v Value, start, stop int) (int, error) {
 	if stop < 0 {
 		stop = max(stop+n, 0)
 	}
-	for i := start; i < stop && i < len(items); i++ {
-		if sameObject(items[i], v) {
-			return i, nil
-		}
-		eq, err := pyEq(items[i], v)
-		if err != nil {
-			return 0, err
-		}
-		if eq {
-			return i, nil
-		}
-	}
-	return -1, nil
+	return seqScan(items, v, start, stop, pyEq)
 }
 
 // methodsSeqCount counts the items equal to v.
 func methodsSeqCount(items []Value, v Value) (Value, error) {
-	n := 0
-	for _, it := range items {
-		if sameObject(it, v) {
-			n++
-			continue
-		}
-		eq, err := pyEq(it, v)
-		if err != nil {
-			return nil, err
-		}
-		if eq {
-			n++
-		}
+	n, err := seqScanCount(items, v, pyEq)
+	if err != nil {
+		return nil, err
 	}
 	return mkInt(int64(n)), nil
 }
